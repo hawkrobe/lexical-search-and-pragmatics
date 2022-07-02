@@ -23,358 +23,6 @@ from scipy import stats
 from sklearn import preprocessing
 from scipy.special import softmax
 
-class SWOW:
-  def __init__(self, data_path):
-    # import swow graph
-    with open(f'{data_path}/swow.gpickle', 'rb') as f:
-        self.graph = pickle.load(f)
-
-    # Import boards
-    with open(f'{data_path}/boards.json', 'r') as json_file:
-        self.boards = json.load(json_file)
-
-    # import empirical clues (cleaned)
-    self.expdata = pd.read_csv(f"{data_path}/final_board_clues_all.csv", 
-                               encoding= 'unicode_escape')
-
-    # import target words
-    self.target_df = pd.read_csv(f"{data_path}/connector_wordpairs_boards.csv".format())
-    self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
-
-    # import embeddings
-    self.embeddings = pd.read_csv(f"{data_path}/swow_associative_embeddings.csv").transpose().values
-    self.embeddings_vocab = pd.read_csv(f"{data_path}/swow_associative_embeddings.csv").columns
-
-  def create_similarity_matrix(matrix):
-    '''
-    inputs:
-    (1) matrix: a numpy array with vectors for which the NxN similarity matrix needs to be created
-    output:
-    a NxN similarity matrix
-    
-    '''
-    N = matrix.shape[0]
-    matrix = 1-scipy.spatial.distance.cdist(matrix, matrix, 'cosine').reshape(-1)
-    matrix = matrix.reshape((N,N))
-    return matrix
-
-  def create_graph(self, path, threshold):
-    '''
-    inputs:
-    (1) path to a csv containing edges 
-    (2) [TODO] a threshold below which to exclude similarity values 
-
-    output:
-    A networkX weighted graph with N nodes 
-    '''
-    edges = pd.read_csv(path).rename(columns={'R123.Strength' : 'weight'})
-    G = nx.from_pandas_edgelist(edges, 'cue', 'response', ['weight'], create_using=nx.DiGraph)
-    G = nx.convert_node_labels_to_integers(G, label_attribute = 'word')
-    with open('../../data/swow.gpickle', 'wb') as f:
-        pickle.dump(G, f, pickle.HIGHEST_PROTOCOL)
-  
-#   def random_walk(word, n_steps, n_walks, vocab, Graph):
-#     '''
-#     A fast random walk implementation.
-#     inputs:
-#     (1) the starting word ('apple')
-#     (2) n_steps: number of steps to run the random walk for
-#     (3) n_walks: number of walks to run 
-#     (3) vocab: the vocabulary from which "word" is selected of size N
-#     (4) Graph: the networkX graph on which the walk will be run
-
-#     outputs:
-#     (1) a N x n_steps array with counts of how many times a node was visited in nth position
-#     '''
-
-#     start_node = list(vocab.vocab_word).index(word) 
-
-#     walks = walker.random_walks(Graph, n_walks=n_walks, walk_len=n_steps,start_nodes=[start_node])
-#     ## walker returns a n_walks x n_steps np array
-#     ## we need to find the number of times each node was visited across each of these walks 
-#     # gives counts of each node visited 
-
-#     df = pd.DataFrame(walks)
-#     X = df.apply(pd.Series.value_counts).fillna(0)
-#     ordervisited_arr = pd.DataFrame(np.zeros((len(vocab), walks.shape[1]))) # 2d array N x n_steps
-#     ordervisited_arr = X.combine_first(ordervisited_arr).values
-
-#     # times_visited is just np.sum(ordervisited_arr, axis = 1)
-#     # code to obtain which words are most visited in some "k" steps:
-#     # words = (-np.sum(ordervisited_arr[:,:100], axis = 1)).argsort()[:20]
-#     # [list(vocab.vocab_word)[i] for i in words]
-#     return ordervisited_arr
-
-  def highestPowerof2(self, n):
-    '''
-    returns the highest power of 2 less than or equal to n
-    '''
- 
-    p = int(math.log(n, 2))
-    return p
-  
-  def returnpowersof2(self, n):
-    return [1 << i for i in range(n+1)]
-
-  def get_nodes_by_word(self, word):
-    return [k for k, v in self.graph.nodes(data=True) if v['word'] == word]
-
-  def union_intersection_nwalks(self, w1, w2, walk_len, n_walks):
-    '''
-    computes the union & intersection of n_walks random walks of n_steps from w1 and w2
-
-    inputs:
-    (1) w1 & w2: the two words for which random walks will be initiated
-    (2) vocabulary: the vocab from which w1 & w2 are selected
-    (3) Graph: the underlying graph for random walk
-
-    outputs:
-    (1) union_list: contains the words visited by EITHER words in descending order of times visited
-    (2) intersection_list: contains the words visited by BOTH words in descending order of times visited acr
-
-    '''
-
-    # OPTIMIZE: remove pandas df overhead
-    # TODO: return number of times node visited 
-    # TODO: initialize with small pseudo count (so that there's a 'baseline' retrieval level)
-    w1_index = self.get_nodes_by_word(w1)
-    w2_index = self.get_nodes_by_word(w2)
-
-    # starts walkmax independent random walks of size vocab
-    rw_w1 = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=w1_index)
-    rw_w2 = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=w2_index)
-
-    union_list = pd.DataFrame()
-    intersection_list = pd.DataFrame()
-
-    # we compute the candidates for all powers of 2 less than n to get "steps" at which walk is truncated
-    n = self.highestPowerof2(len(self.graph.nodes))
-    n_walks = self.returnpowersof2(n)
-    n_steps = self.returnpowersof2(n)
-    for i in n_walks:
-      # get a random number of i walks from the rw output for w1 and w2 
-      w1_random = rw_w1[np.random.choice(rw_w1.shape[0], i, replace=False), :]
-      w2_random = rw_w2[np.random.choice(rw_w2.shape[0], i, replace=False), :]
-
-      # get order of visits 
-      df1 = pd.DataFrame(w1_random)
-      X = df1.apply(pd.Series.value_counts).fillna(0)
-      ordervisited_arr_1 = pd.DataFrame(np.zeros((len(self.graph.nodes), w1_random.shape[1]))) # 2d array N x n_steps
-      ordervisited_arr_1 = X.combine_first(ordervisited_arr_1).values
-
-      df2 = pd.DataFrame(w2_random)
-      X = df2.apply(pd.Series.value_counts).fillna(0)
-      ordervisited_arr_2 = pd.DataFrame(np.zeros((len(self.graph.nodes), w2_random.shape[1]))) # 2d array N x n_steps
-      ordervisited_arr_2 = X.combine_first(ordervisited_arr_2).values
-
-      # once we have the order of visits for "i" walks, we now look at upto n steps within i walks
-      for j in n_steps:
-        # count the number of times a node was visited in j steps
-        w1_main = np.sum(ordervisited_arr_1[:,:j], axis = 1)
-        w2_main = np.sum(ordervisited_arr_2[:,:j], axis = 1)
-        v = {}
-        v["w1_visited_count"] = w1_main
-        print(v)
-        v["w2_visited_count"] = w2_main
-        v["w1*w2"] = v["w1_visited_count"]*v["w2_visited_count"]
-
-        ## compute non-zero, i.e., all visited nodes 
-        nonzero_w1 = list(v.loc[v['w1_visited_count'] != 0].vocab_word)
-        nonzero_w2 = list(v.loc[v['w2_visited_count'] != 0].vocab_word)
-
-        ## compute union and intersection
-        union = set(nonzero_w1).union(set(nonzero_w2))
-        intersection = set(nonzero_w1).intersection(set(nonzero_w2))
-
-        ## we also need the counts of these visited nodes, sorted by nodes visited highly by both words
-        union_df = v.loc[v['vocab_word'].isin(list(union))].sort_values(by='w1*w2', ascending=False)
-        union_df["n_steps"] = j
-        union_df["n_walks"] = i
-        intersection_df = v.loc[v['vocab_word'].isin(list(intersection))].sort_values(by='w1*w2', ascending=False)
-        intersection_df["n_steps"] = j
-        intersection_df["n_walks"] = i
-
-        union_list =  pd.concat([union_list, union_df])
-        intersection_list = pd.concat([intersection_list, intersection_df])
-
-    return union_list, intersection_list
-  
-
-#   def union_intersection(w1, w2, n_walks, vocabulary, Graph):
-#     '''
-#     computes the union & intersection of n_walks random walks of n_steps from w1 and w2
-
-#     inputs:
-#     (1) w1 & w2: the two words for which random walks will be initiated
-#     (2) vocabulary: the vocab from which w1 & w2 are selected
-#     (3) Graph: the underlying graph for random walk
-
-
-#     outputs:
-#     (1) union_list: contains the words visited by EITHER words in descending order of times visited
-#     (2) intersection_list: contains the words visited by BOTH words in descending order of times visited acr
-
-#     '''
-
-#     # starts n_walks independent random walks of size vocab
-#     rw_w1 = search.random_walk(w1, len(vocabulary), n_walks, vocabulary, Graph)
-#     rw_w2 = search.random_walk(w2, len(vocabulary), n_walks, vocabulary, Graph)
-
-#     union_list = pd.DataFrame()
-#     intersection_list = pd.DataFrame()
-
-#     # we compute the candidates for all powers of 2 less than n to get "steps" at which walk is truncated
-
-#     n = search.highestPowerof2(len(vocabulary))
-#     n_steps = search.returnpowersof2(n)
-
-#     for i in n_steps:
-
-#       # count the number of times a node was visited in i steps
-#       w1_main = np.sum(rw_w1[:,:i], axis = 1).tolist()
-#       w2_main = np.sum(rw_w2[:,:i], axis = 1).tolist()
-#       v = vocabulary.copy()
-#       v["w1_visited_count"] = w1_main
-#       v["w2_visited_count"] = w2_main
-#       v["w1*w2"] = v["w1_visited_count"]*v["w2_visited_count"]
-
-#       ## compute non-zero, i.e., all visited nodes 
-#       nonzero_w1 = list(v.loc[v['w1_visited_count'] != 0].vocab_word)
-#       nonzero_w2 = list(v.loc[v['w2_visited_count'] != 0].vocab_word)
-
-#       ## compute union and intersection
-#       union = set(nonzero_w1).union(set(nonzero_w2))
-#       intersection = set(nonzero_w1).intersection(set(nonzero_w2))
-#       ## we also need the counts of these visited nodes, sorted by nodes visited highly by both words
-#       union_df = v.loc[v['vocab_word'].isin(list(union))].sort_values(by='w1*w2', ascending=False)
-#       union_df["n_steps"] = i
-#       intersection_df = v.loc[v['vocab_word'].isin(list(intersection))].sort_values(by='w1*w2', ascending=False)
-#       intersection_df["n_steps"] = i
-
-#       union_list =  pd.concat([union_list, union_df])
-#       intersection_list = pd.concat([intersection_list, intersection_df])
-
-#     return union_list, intersection_list
-
-  def predication_vector(sim_matrix, w1, w2, m, k, vocab):
-    """
-    # computes a predication vector based on kintsch's predication algorithm
-    # in this algorithm, first m neighbors of w1 are computed
-    # a network is created using m, w1, and w2 with inhibitory links between the m nodes and all cosines b/w m and w1 and w2
-    # this network is then "integrated" until steady state, and then
-    # a centroid is calculated using w1, w2, and k strongest neighbors of w2
-    ## details of spreading activation:
-    # More specific, an activation vector representing the initial activation
-    # values of all nodes in the net is postmultiplied repeatedly with
-    # the connectivity matrix. After each multiplication the activation
-    # values are renormalized: Negative values are set to zero,
-    # and each of the positive activation values is divided by the sum
-    # of all activation values, so that the total activation on each cycles
-    # remains at a value of one (e.g., Rumelhart & McClelland,
-    # 1986). Usually, the system finds a stable state fairly rapidly;
-    """
-    neighbors_of_w1 = sim_matrix[list(vocab.vocab_word).index(w1)]
-    topn_indices = np.argpartition(neighbors_of_w1, -m)[-m:].tolist()
-    nodes_indices = list(set(topn_indices + [list(vocab.vocab_word).index(w1),list(vocab.vocab_word).index(w2) ]))
-    nodes = [list(vocab.vocab_word)[i] for i in nodes_indices]
-    vecs = representations['glove'][nodes_indices]
-    # construct nodes similarity matrix 
-    s = create_similarity_matrix(vecs)
-    w1_index = nodes.index(w1)
-    w2_index = nodes.index(w2)
-    valid_indices = np.arange(0,s.shape[1]).tolist()
-    valid_indices.pop(w1_index)
-    valid_indices.pop(w2_index)
-    s[:, valid_indices] = 0
-    # also set connections to self = 0
-    s[w1_index, w1_index] = 0
-    s[w2_index, w2_index] = 0
-    n_zero = s.size - np.count_nonzero(s)
-    sum_positive_activations = np.sum(s)
-    # set all 0 values to sum/n_zero
-    s[s == 0] = -sum_positive_activations/n_zero
-
-    ## now we perform the spreading activation integration: restricted to 5 steps
-    s_integrated = kintsch_integration(s, 5)
-    ## now we extract k neighbors of w2
-
-    neighbors_of_w2 = s_integrated[w2_index]
-    topn_indices = np.argpartition(neighbors_of_w2, -k)[-k:].tolist()
-    w2_words = [nodes[i] for i in topn_indices]
-    indices_in_vocab = [list(vocab.vocab_word).index(i) for i in w2_words]
-    nodes_indices = list(set(indices_in_vocab + [list(vocab.vocab_word).index(w1),list(vocab.vocab_word).index(w2) ]))
-    finalnodes = [list(vocab.vocab_word)[i] for i in nodes_indices]
-    vecs = representations['glove'][nodes_indices]
-    ## next we compute centroid of w1, w2, and w2_words
-    centroid = np.mean(vecs, axis = 0).reshape((1,vecs.shape[1]))
-    close = find_closest(centroid, vocab, representations['glove'])
-    return  close
-    
-  def kintsch_integration(m, n_times):
-    for i in range(1,n_times):
-      m = m**(i+1)
-      m[m <0] = 0
-      sum_positive_activations = np.sum(m)
-      m = m/sum_positive_activations
-    return m
-
-  def find_closest(vector, vocab, embeddings, k = 10):
-    """finds the words closest to given vector in a given vocab for given embeddings"""
-    cosine = 1-scipy.spatial.distance.cdist(embeddings, vector, 'cosine')
-    cosine = cosine.flatten()
-    centroid_indices = np.argpartition(cosine, -k)[-k:].tolist()
-    centroid_words = [list(vocab.vocab_word)[i] for i in centroid_indices]
-    return centroid_words
-  
-  def old_random_walk(word, n_steps, vocab, Graph):
-    '''
-    A random walk implementation.
-    inputs:
-    (1) the starting word ('apple')
-    (2) n_steps: number of steps to run the random walk for
-    (3) vocab: the vocabulary from which "word" is selected
-    (4) Graph: the networkX graph on which the walk will be run
-
-    outputs:
-    (1) all words visited during the walk
-    (2) number of times the word was visited
-    '''
-    # run this RW until all nodes have been visited at least once
-    nodes_visited = []
-    random_node = list(vocab.vocab_word).index(word) 
-    nodes_visited.append(random_node)
-    dict_counter = {} #initialise the value for all nodes as 0 (i.e., each node has been visited 0 times)
-    for i in range(Graph.number_of_nodes()):
-        dict_counter[i] = 0
-    # update dict_count for the chosen random node by 1 (since walk starts here)
-    dict_counter[random_node] = dict_counter[random_node]+1
-
-    #Traversing through the neighbors of start node
-    #increment by traversing through all neighbors nodes ()
-    for i in range(n_steps):
-        list_for_nodes = list(Graph.neighbors(random_node))
-        neighbors = {}
-        for n in list_for_nodes:
-          neighbors[n] = Graph.edges[(random_node,n)]['weight']
-        if len(list_for_nodes)==0:
-          # if random_node having no outgoing edges
-          # choose a different random node and update its visit count
-          random_node = random.choice([i for i in range(Graph.number_of_nodes())])
-          dict_counter[random_node] = dict_counter[random_node]+1
-          nodes_visited.append(random_node)
-        else:
-          #choose a node randomly from neighbors of current random_node
-          random_node = random.choices(population = list_for_nodes, k = 1,
-                  weights=list(neighbors.values()))[0]
-          dict_counter[random_node] = dict_counter[random_node]+1
-          nodes_visited.append(random_node)
-            
-    ## return the words visited and the counts of each time a node was visited (in the order of vocab) as a numpy array
-
-    words_visited = [list(vocab.vocab_word)[index] for index in nodes_visited]
-
-    return words_visited, np.fromiter(dict_counter.values(), dtype=float)
-  
 
 class RSA:
 
@@ -437,10 +85,10 @@ class RSA:
 
     ## next we find the product of similarities between c-w1 and c-w2 for that specific board's 190 word-pairs
     ## this gives us a 190 x N array of product similarities for a given combs_df
-    ## specifically, for each possible pair, pull out 
+    ## specifically, for each possible pair, pull out
     f_w1_list =  np.array([clue_sims[board_df[board_df["vocab_word"]==row["Word1"]].index.values[0]]
                           for  index, row in combs_df.iterrows()])
-    f_w2_list =  np.array([clue_sims[board_df[board_df["vocab_word"]==row["Word2"]].index.values[0]] 
+    f_w2_list =  np.array([clue_sims[board_df[board_df["vocab_word"]==row["Word2"]].index.values[0]]
                           for  index, row in combs_df.iterrows()])
 
     # result is of length 190 for the product of similarities (i.e. how similar each word i is to BOTH in pair)
@@ -450,7 +98,7 @@ class RSA:
   def literal_guesser(board_name, representations, modelname, candidates, vocab, boards):
     '''
     inputs are:
-    (1) board name ("e1_board1_words"), 
+    (1) board name ("e1_board1_words"),
     (2) representation: embedding space to consider, representations
     (3) modelname: 'glove'
     (4) candidates (a list ['apple', 'mango'] etc.)
@@ -463,7 +111,7 @@ class RSA:
     board_combos = {board_name : RSA.compute_board_combos(board_name,boards) for board_name in boards.keys()}
 
     board_matrices = {
-      key : {board_name :RSA.create_board_matrix(board_combos[board_name], boards[board_name], representations, modelname, vocab, candidates) 
+      key : {board_name :RSA.create_board_matrix(board_combos[board_name], boards[board_name], representations, modelname, vocab, candidates)
             for board_name in boards.keys()}
       for (key, embedding) in representations.items()
     }
@@ -474,8 +122,8 @@ class RSA:
     '''
     inputs:
     (1) board name ("e1_board1_words")
-    (2) beta: optimized parameter 
-    (3) costweight: optimized weight to freequency 
+    (2) beta: optimized parameter
+    (3) costweight: optimized weight to freequency
     (4) representation: embedding space to consider, representations
     (5) modelname: 'glove'
     (6) candidates (a list of words/clues to iterate over)
@@ -491,10 +139,10 @@ class RSA:
     clues_cost = -np.array([list(vocab["LgSUBTLWF"])[i] for i in candidate_index])
     utility = (1-costweight) * literal_guesser_prob - costweight * clues_cost
     return softmax(beta * utility, axis = 1)
-  
+
   def pragmatic_guesser(board_name, beta, costweight, representations,modelname,candidates, vocab, boards):
     return softmax(np.log(RSA.pragmatic_speaker(board_name, beta, costweight, representations, modelname, candidates, vocab, boards)), axis = 0)
-  
+
   def get_speaker_scores(cluedata, speaker_word_pairs, probsarray, probsarray_sorted, candidate_df) :
     '''
     takes a set of clues and word pairs, and computes the probability and rank of each clue
@@ -514,7 +162,7 @@ class RSA:
         clue1 = row["Clue1"]
         wordpair = str(row["wordpair"]).replace(" ", "")
         wordpair_index = speaker_word_pairs.index(wordpair)
-        
+
         # find index of clue
         if clue1 in list(candidate_df["vocab_word"]):
             clue_index = list(candidate_df["vocab_word"]).index(clue1)
@@ -530,7 +178,7 @@ class RSA:
 
   def get_speaker_df(representations, combined_boards_df,params, candidates, vocab, cluedata, board_combos, target_df, boards ):
     '''
-    returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations 
+    returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations
     over a given set of candidates
 
     inputs:
@@ -557,7 +205,7 @@ class RSA:
         board = row["boardwords"]
         boardname = row["boardnames"]
         wordpairlist = RSA.get_wordpair_list(board_combos, boardname)
-        speaker_word_pairs = target_df[(target_df["boardnames"] == row["boardnames"]) & 
+        speaker_word_pairs = target_df[(target_df["boardnames"] == row["boardnames"]) &
                                       (target_df["Experiment"] == row["Experiment"])]["wordpair"]
         speaker_word_pairs = list(speaker_word_pairs)
         speaker_df_new = pd.DataFrame({'wordpair': speaker_word_pairs})
@@ -579,7 +227,7 @@ class RSA:
         speakerprobs_df = pd.concat([speakerprobs_df, expdata_board])
 
     return speakerprobs_df
-  
+
 class nonRSA:
   def get_distinctiveness(context_board, alpha, candidates, representations, modelname, vocab, target_df):
     '''
@@ -593,7 +241,7 @@ class nonRSA:
     board_vectors = representations[modelname][board_word_indices]
 
     ## clue_sims is the similarity of ALL clues in full searchspace (size N) to EACH word on board (size 20)
-    
+
     ### NEED TO FIX THIS TO ONLY CONSIDER CANDIDATES!!
     candidate_index = [list(vocab["vocab_word"]).index(w) for w in candidates]
     candidate_embeddings = representations[modelname][candidate_index]
@@ -617,7 +265,7 @@ class nonRSA:
 
   def speaker_targetboard(context_board, alpha, beta, candidates, representations, modelname, vocab, target_df):
     '''
-    takes in a given board, wordpairs, and a set of possible candidates, and returns the likelihood of 
+    takes in a given board, wordpairs, and a set of possible candidates, and returns the likelihood of
     each candidate for each target wordpair on that board based on:
     alpha(clue-w1*clue-w2) - (1-alpha)*(average of all other words on board)
     i.e., maximize similarity to wordpair and minimize similarity to other words
@@ -642,7 +290,7 @@ class nonRSA:
     board_vectors = representations[modelname][board_word_indices]
 
     ## clue_sims is the similarity of ALL clues in full searchspace (size N) to EACH word on board (size 20)
-    
+
     ### NEED TO FIX THIS TO ONLY CONSIDER CANDIDATES!!
     candidate_index = [list(vocab["vocab_word"]).index(w) for w in candidates]
     candidate_embeddings = representations[modelname][candidate_index]
@@ -687,23 +335,23 @@ class nonRSA:
 
     clue_board_df_main = pd.DataFrame()
 
-    for modelname in modelnames: 
+    for modelname in modelnames:
       for alpha in np.arange(0,1.1, 0.1):
-        ## for a given alpha, compute the clue similarities at the board level 
+        ## for a given alpha, compute the clue similarities at the board level
         beta = optimal_params[modelname][0]
         print(f"for {modelname} and alpha {alpha}")
-        
+
         speaker_board_probs = {
             board_name : nonRSA.speaker_targetboard(boards[board_name], alpha, beta, candidates, representations, modelname, vocab, target_df)
             for board_name in boards.keys()
-        }   
-        
+        }
+
         for board in speaker_board_probs.keys():
-          
+
           ## get the clues we need scores for from expdatanew
           clue_main = cluedata.loc[cluedata['boardnames'] == board]
           target_main = target_df.loc[target_df['boardnames'] == board]
-          
+
           target_main.reset_index(inplace = True)
           #print(target_main)
 
@@ -720,7 +368,7 @@ class nonRSA:
               mainscores = speaker_board_probs[board][wordpair_index]
               sorted_clue_probs = np.argsort(-mainscores).tolist()
               #print("sorted_clue_probs_indices = ", sorted_clue_probs)
-              
+
               # we next obtain the score for each clue for a specific wordpair
               clue_similarity = speaker_board_probs[board][wordpair_index][clue_index]
               # want to find index of this particular clue in the overall distribution
@@ -729,7 +377,7 @@ class nonRSA:
             else:
               clue_similarity = "NA"
               clue_rank = "NA"
-            
+
             clue_board_df = pd.DataFrame({'boardnames': [board]})
             clue_board_df["wordpair"] = wordpair
             clue_board_df["Clue1"] = row["Clue1"]
@@ -737,10 +385,7 @@ class nonRSA:
             clue_board_df["clue_rank"] = clue_rank
             clue_board_df["alpha"] = alpha
             clue_board_df["Model"] = modelname
-              
-            clue_board_df_main = pd.concat([clue_board_df_main, clue_board_df])
-    
-    return clue_board_df_main
-      
 
-      
+            clue_board_df_main = pd.concat([clue_board_df_main, clue_board_df])
+
+    return clue_board_df_main
