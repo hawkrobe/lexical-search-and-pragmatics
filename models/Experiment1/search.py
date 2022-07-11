@@ -20,6 +20,8 @@ class SWOW:
   def __init__(self, data_path):
     self.load_graph(data_path)
     self.load_random_walks(data_path)
+    self.index_to_name = {k: v['word'] for k,v in self.graph.nodes(data=True)}
+    self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
 
     # Import boards
     with open(f'{data_path}/boards.json', 'r') as json_file:
@@ -95,22 +97,21 @@ class SWOW:
     '''
     looks up which node IDs a list of words correspond to
     '''
-    return [k for k, v in self.graph.nodes(data=True)
-              for word in words
-              if v['word'] == word]
+    return [self.name_to_index[name] if name in self.name_to_index else None
+            for name in words]
 
   def get_words_by_node(self, nodes):
     '''
     looks up which words a list of node IDs correspond to
     '''
-    return [self.graph.nodes[node]['word'] for node in nodes]
+    return [self.index_to_name[index] if index in self.index_to_name else None
+            for index in nodes]
 
   def union_intersection_candidates(self, w1, w2):
     '''
     return a list of candidates sorted by likelihood of being visited
     '''
 
-    # looks up row for this target pair
     target_indices = self.get_nodes_by_word([w1, w2])
     walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist()
     union_counts = {budget : defaultdict(lambda: 0.001) for budget in self.powers_of_two(1000)}
