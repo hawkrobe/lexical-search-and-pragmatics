@@ -1,4 +1,4 @@
-,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24
+,Experiment,Board,Word1,Word2,Clue1,clueCount,wordpair,union2,intersection2,union4,intersection4,union8,intersection8,union16,intersection16,union32,intersection32,union64,intersection64,union128,intersection128,union256,intersection256,union512,intersection512
 0,E2,TrialList8,army,drum,band,5,army - drum,47.001,0.001,64.001,0.001,70.001,0.001,72.001,0.001,82.001,0.001,116.001,1.001,154.001,3.001,229.001,9.001,359.001,40.001
 1,E2,TrialList8,army,drum,battle,1,army - drum,15.001,0.001,35.001,0.001,40.001,0.001,41.001,0.001,43.001,0.001,58.001,2.001,75.001,3.001,124.001,5.0009999999999994,226.001,14.001
 2,E2,TrialList8,army,drum,battle cry,2,army - drum,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001,0.001

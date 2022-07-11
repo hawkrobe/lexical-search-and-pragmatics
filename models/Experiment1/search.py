@@ -167,8 +167,11 @@ class SWOW:
 
     # save to file
     pd.concat(
-      [pd.concat(rows,axis=0,ignore_index=True), pd.DataFrame.from_dict(scores)],
-      axis=1, ignore_index=True
+      [
+        pd.concat(rows,axis=0,ignore_index=True),
+        pd.DataFrame.from_dict(scores)
+      ],
+      axis=1
     ).to_csv(
       '../../data/scores.csv'
     )
