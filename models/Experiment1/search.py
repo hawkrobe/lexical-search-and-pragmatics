@@ -156,18 +156,19 @@ class SWOW:
 
   def save_scores(self):
     scores = defaultdict(list)
-
+    rows = []
     # look up how often each clue was visited
     for name, group in swow.expdata.groupby('wordpair') :
       union_score, intersect_score = swow.clue_score(group['Clue1'].to_numpy(), group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
       for key in union_score.keys() :
         scores['union' + str(key)].extend(union_score[key])
         scores['intersection' + str(key)].extend(intersect_score[key])
+      rows.append(group)
 
     # save to file
     pd.concat(
-      [swow.expdata.copy(), pd.DataFrame.from_dict(scores)],
-      axis=1
+      [pd.concat(rows,axis=0,ignore_index=True), pd.DataFrame.from_dict(scores)],
+      axis=1, ignore_index=True
     ).to_csv(
       '../../data/scores.csv'
     )
