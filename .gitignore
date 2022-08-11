@@ -1,4 +1,6 @@
-# R stuff
+.DS_Store
+
+#R stuff
 *.html
 
 # emacs stuff
