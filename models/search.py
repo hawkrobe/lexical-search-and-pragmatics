@@ -1,0 +1,176 @@
+import random
+import os
+import json
+import pickle
+import itertools
+import walker
+import math
+import warnings
+import scipy.spatial.distance
+
+import pandas as pd
+import numpy as np
+import networkx as nx
+
+from collections import defaultdict
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+class SWOW:
+  def __init__(self, data_path):
+    # import target words
+    self.target_df = pd.read_csv(f"{data_path}/targets.csv".format())
+    self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
+    self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
+
+    self.load_graph(data_path)
+    self.index_to_name = {k: v['word'] for k,v in self.graph.nodes(data=True)}
+    self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
+    self.load_random_walks(data_path)
+
+
+
+  def load_graph(self, data_path):
+    '''
+    reads in networkx graph saved as pickle
+    '''
+    if os.path.exists(f'{data_path}/walk_data/swow.gpickle') :
+      with open(f'{data_path}/walk_data/swow.gpickle', 'rb') as f:
+        self.graph = pickle.load(f)
+    else :
+      self.save_graph(data_path, None)
+
+  def save_graph(self, path, threshold):
+    '''
+    creates graph directly from pandas edge list and saves to file
+    '''
+    path = path + 'walk_data/swow-strengths.csv'
+    edges = pd.read_csv(path).rename(columns={'R123.Strength' : 'weight'})
+    G = nx.from_pandas_edgelist(edges, 'cue', 'response', ['weight'], create_using=nx.DiGraph)
+    G = nx.convert_node_labels_to_integers(G, label_attribute = 'word')
+    with open('../data/walk_data/swow.gpickle', 'wb') as f:
+        pickle.dump(G, f, pickle.HIGHEST_PROTOCOL)
+
+  def load_random_walks(self, data_path):
+    '''
+    runs n_walks independent random walks of walk_len length from each words
+    '''
+    if os.path.exists(f'{data_path}/walk_data/walks.pkl'):
+      with open(f'{data_path}/walk_data/walks.pkl', 'rb') as f:
+        self.rw = pickle.load(f)
+    else :
+      self.save_random_walks()
+
+  def save_random_walks(self, n_walks = 1000, walk_len = 10000):
+    '''
+    runs n_walks independent random walks of walk_len length from each words
+    '''
+    indices = self.get_nodes_by_word(self.target_words)
+    self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices)
+    with open('../data/walk_data/walks.pkl', 'wb') as f:
+      pickle.dump(self.rw, f)
+
+
+  def chunk(self, l, n):
+    '''
+    iterates through l in chunks of size n
+    '''
+    c = itertools.count()
+    return (list(it) for _, it in itertools.groupby(l, lambda x: next(c)//n))
+
+  def powers_of_two(self, n):
+    '''
+    returns all powers of 2 between 2 and n
+    '''
+    return [2**i for i in range(1, int(math.log(n, 2))+1)]
+
+  def get_nodes_by_word(self, words):
+    '''
+    looks up which node IDs a list of words correspond to
+    '''
+    return [self.name_to_index[name] if name in self.name_to_index else None
+            for name in words]
+
+  def get_words_by_node(self, nodes):
+    '''
+    looks up which words a list of node IDs correspond to
+    '''
+    return [self.index_to_name[index] if index in self.index_to_name else None
+            for index in nodes]
+
+  def union_intersection_candidates(self, w1, w2):
+    '''
+    return a list of candidates sorted by likelihood of being visited
+    '''
+
+    target_indices = self.get_nodes_by_word([w1, w2])
+    walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist()
+    union_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
+    intersection_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
+    for search_budget in self.powers_of_two(1000) :
+      for w1_walk, w2_walk in self.chunk(walks, 2) :
+        for element in set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget]) :
+          intersection_counts[search_budget][element] += 1
+        for element in set(w1_walk[: search_budget]).union(w2_walk[: search_budget]) :
+          union_counts[search_budget][element] += 1
+
+    return union_counts, intersection_counts
+
+  def clue_score(self, clues, w1, w2):
+    clue_indices = self.get_nodes_by_word(clues)
+    union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
+    return ({budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in union_counts.items()},
+            {budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in intersection_counts.items()})
+
+  def save_candidates(self):
+    # Loop through word pairs
+    unions = {}
+    intersections = {}
+    for w1, w2 in  zip(swow.target_df['Word1'], swow.target_df['Word2']) :
+      print(w1,w2)
+      union_counts, intersection_counts = swow.union_intersection_candidates(w1, w2)
+      union_candidates = {budget: sorted(d.items(), key=lambda k_v: k_v[1], reverse=True)
+                          for (budget, d) in union_counts.items()}
+      union_nodes = {budget: [x[0] for x in d] for (budget, d) in union_candidates.items()}
+      unions[w1 + '-' + w2] = {'budget=' + str(budget): swow.get_words_by_node(d) for (budget, d) in union_nodes.items()}
+
+      intersection_candidates = {budget: sorted(d.items(), key=lambda k_v: k_v[1], reverse=True)
+                                 for (budget, d) in intersection_counts.items()}
+      intersection_nodes = {budget: [x[0] for x in d] for (budget, d) in intersection_candidates.items()}
+      intersections[w1 + '-' + w2] = {'budget=' + str(budget): swow.get_words_by_node(d) for (budget, d) in intersection_nodes.items()}
+
+    with open('../data/walk_data/intersection_candidates.json', 'w') as f:
+      json.dump(intersections, f)
+
+    with open('../data/walk_data/union_candidates.json', 'w') as f:
+      json.dump(unions, f)
+
+  def save_scores(self, data_path):
+    # import empirical clues (cleaned)
+    self.expdata = pd.read_csv(f"{data_path}/e2_corrected.csv", encoding= 'unicode_escape')
+    scores = defaultdict(list)
+    rows = []
+    # look up how often each clue was visited
+    for name, group in swow.expdata.groupby('wordpair') :
+      union_score, intersect_score = swow.clue_score(group['correctedClue'].to_numpy(), group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
+      for key in union_score.keys() :
+        scores['union' + str(key)].extend(union_score[key])
+        scores['intersection' + str(key)].extend(intersect_score[key])
+      rows.append(group)
+
+    # save to file
+    pd.concat(
+      [
+        pd.concat(rows,axis=0,ignore_index=True),
+        pd.DataFrame.from_dict(scores)
+      ],
+      axis=1
+    ).to_csv(data_path+'/scores.csv')
+
+
+if __name__ == "__main__":
+  # current dir is models
+  swow = SWOW('../data')
+  np.random.seed(44)
+  swow.save_scores('../data/exp2')
+  #swow.save_candidates()
