@@ -293,17 +293,7 @@ class RSA:
 
 
 class nonRSA:
-  def apply_corrections(df, corrections, vocab):
-    df = df.copy()
-    df["correctedClue"] = "NA"
-    for index, row in df.iterrows():
-        clue = row['Clue1']
-        if clue not in list(vocab.vocab_word) and clue in list(corrections.vocab_word):
-            df.at[index, 'correctedClue'] = corrections.loc[corrections.vocab_word == clue].correction.values[0]
-        else:
-            df.at[index, 'correctedClue'] = clue
-    return df
-  
+    
   def get_distinctiveness(context_board, alpha, candidates, representations, modelname, vocab, target_df):
     '''
     takes in a given board, target wordpairs, and a set of clue candidates, and returns the distinctivess
@@ -445,62 +435,6 @@ class nonRSA:
             
     return candidateprobs_nonRSA
   
-  def get_common_candidates(union_dict, intersection_dict, expdata, resultspath):
-    common_candidates = pd.DataFrame()
-    
-    for index, row in expdata.iterrows():
-      ID = row['clueGiverID']
-    
-      wordpair = row["wordpair_id"]
-      w1, w2 = wordpair.split("-")
-      reverse_wordpair = w2 + "-" + w1
-      behavioral_clue_list = row["clue_list"]
-      clueFinal = row["clueFinal"]
-    
-      cluedict_union = union_dict[wordpair] if wordpair in union_dict.keys() else union_dict[reverse_wordpair]
-      cluedict_intersection = intersection_dict[wordpair] if wordpair in intersection_dict.keys() else intersection_dict[reverse_wordpair]
-      
-      budget_types = list(intersection_dict['happy-sad'].keys())
-      
-      for budget in budget_types:
-        
-        cluelist_intersection = []
-        cluelist_union = []
-        intersection_common =  []
-        union_common = []
-        finalclue_index_union = -1
-        finalclue_index_intersection = -1
-        
-        if budget in cluedict_union:
-          cluelist_union = cluedict_union[budget]
-          union_common = list(set(behavioral_clue_list).intersection(cluelist_union))
-          finalclue_index_union = cluelist_union.index(clueFinal) if clueFinal in cluelist_union else -1
-          
-        if budget in cluedict_intersection:
-          cluelist_intersection = cluedict_intersection[budget]
-          intersection_common = list(set(behavioral_clue_list).intersection(cluelist_intersection))
-          finalclue_index_intersection = cluelist_intersection.index(clueFinal) if clueFinal in cluelist_intersection else -1
-          
-
-        common_df = pd.DataFrame({'clueGiverID': [ID]})
-        common_df["wordpair"] = wordpair
-        common_df["Level"] = row["Level"]
-        common_df["clueFinal"] = clueFinal
-        common_df["budget"] = budget
-        common_df["behavioral_clue_list"] = str(behavioral_clue_list)
-        common_df["len_cluelist_behavioral"] = len(behavioral_clue_list)
-        common_df["len_cluelist_union"] = len(cluelist_union)
-        common_df["union_common"] = str(union_common)
-        common_df["len_union_common"] = len(union_common)
-        common_df["finalclue_index_union"] = finalclue_index_union
-        common_df["len_cluelist_intersection"] = len(cluelist_intersection)
-        common_df["intersection_common"] = str(intersection_common)
-        common_df["len_intersection_common"] = len(intersection_common)
-        common_df["finalclue_index_intersection"] = finalclue_index_intersection
-          
-        common_candidates = pd.concat([common_candidates, common_df])
-        common_candidates.to_csv(resultspath, index = False)
-    return common_candidates
 
   def speaker_targetboard_cluescores(modelnames, optimal_params, board_combos, boards, candidates, vocab, representations, target_df, cluedata):
     '''
@@ -579,3 +513,73 @@ class nonRSA:
             clue_board_df_main = pd.concat([clue_board_df_main, clue_board_df])
 
     return clue_board_df_main
+
+class utils:
+  def apply_corrections(df, corrections, vocab):
+    df = df.copy()
+    df["correctedClue"] = "NA"
+    for index, row in df.iterrows():
+        clue = row['Clue1']
+        if clue not in list(vocab.vocab_word) and clue in list(corrections.vocab_word):
+            df.at[index, 'correctedClue'] = corrections.loc[corrections.vocab_word == clue].correction.values[0]
+        else:
+            df.at[index, 'correctedClue'] = clue
+    return df
+
+  def get_common_candidates(union_dict, intersection_dict, expdata, resultspath):
+    common_candidates = pd.DataFrame()
+    
+    for index, row in expdata.iterrows():
+      ID = row['clueGiverID']
+      wordpair = row["wordpair_id"]
+      w1, w2 = wordpair.split("-")
+      reverse_wordpair = w2 + "-" + w1
+      behavioral_clue_list = row["clue_list"]
+      clueFinal = row["clueFinal"]
+      cluedict_union = (union_dict[wordpair] 
+                        if wordpair in union_dict.keys() 
+                        else union_dict[reverse_wordpair])
+      cluedict_intersection = (intersection_dict[wordpair] 
+                               if wordpair in intersection_dict.keys() 
+                               else intersection_dict[reverse_wordpair])
+      budget_types = list(intersection_dict['happy-sad'].keys())
+      
+      for budget in budget_types:
+        
+        cluelist_intersection = []
+        cluelist_union = []
+        intersection_common =  []
+        union_common = []
+        finalclue_index_union = -1
+        finalclue_index_intersection = -1
+        
+        if budget in cluedict_union:
+          cluelist_union = cluedict_union[budget]
+          union_common = list(set(behavioral_clue_list).intersection(cluelist_union))
+          finalclue_index_union = cluelist_union.index(clueFinal) if clueFinal in cluelist_union else -1
+          
+        if budget in cluedict_intersection:
+          cluelist_intersection = cluedict_intersection[budget]
+          intersection_common = list(set(behavioral_clue_list).intersection(cluelist_intersection))
+          finalclue_index_intersection = cluelist_intersection.index(clueFinal) if clueFinal in cluelist_intersection else -1
+          
+
+        common_df = pd.DataFrame({'clueGiverID': [ID]})
+        common_df["wordpair"] = wordpair
+        common_df["Level"] = row["Level"]
+        common_df["clueFinal"] = clueFinal
+        common_df["budget"] = budget
+        common_df["behavioral_clue_list"] = str(behavioral_clue_list)
+        common_df["len_cluelist_behavioral"] = len(behavioral_clue_list)
+        common_df["len_cluelist_union"] = len(cluelist_union)
+        common_df["union_common"] = str(union_common)
+        common_df["len_union_common"] = len(union_common)
+        common_df["finalclue_index_union"] = finalclue_index_union
+        common_df["len_cluelist_intersection"] = len(cluelist_intersection)
+        common_df["intersection_common"] = str(intersection_common)
+        common_df["len_intersection_common"] = len(intersection_common)
+        common_df["finalclue_index_intersection"] = finalclue_index_intersection
+          
+        common_candidates = pd.concat([common_candidates, common_df])
+        common_candidates.to_csv(resultspath, index = False)
+    return common_candidates
