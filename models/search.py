@@ -28,8 +28,6 @@ class SWOW:
     self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
     self.load_random_walks(data_path)
 
-
-
   def load_graph(self, data_path):
     '''
     reads in networkx graph saved as pickle
@@ -69,7 +67,6 @@ class SWOW:
     self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices)
     with open('../data/walk_data/walks.pkl', 'wb') as f:
       pickle.dump(self.rw, f)
-
 
   def chunk(self, l, n):
     '''
@@ -126,18 +123,18 @@ class SWOW:
     # Loop through word pairs
     unions = {}
     intersections = {}
-    for w1, w2 in  zip(swow.target_df['Word1'], swow.target_df['Word2']) :
+    for w1, w2 in  zip(self.target_df['Word1'], self.target_df['Word2']) :
       print(w1,w2)
-      union_counts, intersection_counts = swow.union_intersection_candidates(w1, w2)
+      union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
       union_candidates = {budget: sorted(d.items(), key=lambda k_v: k_v[1], reverse=True)
                           for (budget, d) in union_counts.items()}
       union_nodes = {budget: [x[0] for x in d] for (budget, d) in union_candidates.items()}
-      unions[w1 + '-' + w2] = {'budget=' + str(budget): swow.get_words_by_node(d) for (budget, d) in union_nodes.items()}
+      unions[w1 + '-' + w2] = {'budget=' + str(budget): self.get_words_by_node(d) for (budget, d) in union_nodes.items()}
 
       intersection_candidates = {budget: sorted(d.items(), key=lambda k_v: k_v[1], reverse=True)
                                  for (budget, d) in intersection_counts.items()}
       intersection_nodes = {budget: [x[0] for x in d] for (budget, d) in intersection_candidates.items()}
-      intersections[w1 + '-' + w2] = {'budget=' + str(budget): swow.get_words_by_node(d) for (budget, d) in intersection_nodes.items()}
+      intersections[w1 + '-' + w2] = {'budget=' + str(budget): self.get_words_by_node(d) for (budget, d) in intersection_nodes.items()}
 
     with open('../data/walk_data/intersection_candidates.json', 'w') as f:
       json.dump(intersections, f)
@@ -147,12 +144,14 @@ class SWOW:
 
   def save_scores(self, data_path):
     # import empirical clues (cleaned)
-    self.expdata = pd.read_csv(f"{data_path}/e2_corrected.csv", encoding= 'unicode_escape')
+    expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
     scores = defaultdict(list)
     rows = []
     # look up how often each clue was visited
-    for name, group in swow.expdata.groupby('wordpair') :
-      union_score, intersect_score = swow.clue_score(group['correctedClue'].to_numpy(), group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
+    for name, group in expdata.groupby('wordpair') :
+      union_score, intersect_score = self.clue_score(group['correctedClue'].to_numpy(), 
+                                                     group['Word1'].to_numpy()[0], 
+                                                     group['Word2'].to_numpy()[0])
       for key in union_score.keys() :
         scores['union' + str(key)].extend(union_score[key])
         scores['intersection' + str(key)].extend(intersect_score[key])
@@ -165,12 +164,13 @@ class SWOW:
         pd.DataFrame.from_dict(scores)
       ],
       axis=1
-    ).to_csv(data_path+'/scores.csv')
+    ).to_csv('/'.join(data_path.split('/')[:-1])+'/scores.csv')
 
 
 if __name__ == "__main__":
   # current dir is models
   swow = SWOW('../data')
   np.random.seed(44)
-  swow.save_scores('../data/exp2')
+#  swow.save_scores('../data/exp2/e2_corrected.csv')
+  swow.save_scores('../data/exp1/e1_data_long.csv')
   #swow.save_candidates()
