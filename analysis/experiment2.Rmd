@@ -1,0 +1,98 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+# E2: speaker selections
+
+```{r}
+setwd('../../data/exp2')
+
+e2_clues = read_csv("e2_corrected.csv") %>% 
+  mutate(wordpair = gsub(' - ', '-', wordpair)) %>%
+  rename(clue = correctedClue)%>%
+  distinct()%>%
+  select(wordpair, clue, clueCount, Level)
+
+search = read_csv("scores.csv") %>%
+  pivot_longer(names_to = "model", cols = union2:intersection512)%>%
+  rename(clue = correctedClue)%>%
+  separate(model, into = c("type", "budget"), "(?<=[a-z])(?=[0-9])")%>%
+  mutate(value = value/1000)
+```
+
+
+
+## overall patterns
+
+```{r}
+e2_search =search %>%
+    mutate(model= "walk-only", alpha = "walk-only",
+           wordpair = gsub('\\s+', '', wordpair))%>%
+  select(wordpair, boardnames, budget, clue, model, alpha, type, value )
+max(e2_search$value)
+
+e2_nonRSA = read_csv("nonRSAprobs.csv") %>% mutate(model = "nonRSA", alpha = as.character(alpha)) 
+e2_RSA = read_csv("RSAprobs.csv") %>% mutate(model = "RSA", alpha = "RSA")
+
+e2_nonRSA_RSA = rbind(e2_RSA, e2_nonRSA) %>%
+  rename(union = clue_probs_union, intersection = clue_probs_intersection)%>%
+  pivot_longer(names_to = "type", cols = union:intersection)
+
+e2_combined_models = rbind(e2_search, e2_nonRSA_RSA) %>%
+  left_join(e2_clues) %>%
+  mutate(LL = log(value)*clueCount,
+         budget = as.numeric(gsub("[^0-9.-]", "", budget)))
+
+# histogram
+e2_combined_models %>%
+  ggplot(aes(x = LL, group = model, fill = model)) +
+  geom_histogram(binwidth = 50) + theme_few()
+
+e2_sumLL = e2_combined_models %>% 
+  group_by(alpha, budget, type)%>%
+  summarize_at(vars(LL), sum)
+  
+e2_plot = e2_sumLL %>%
+  ggplot(aes(x = budget, y = LL, color = alpha, group = alpha)) +
+  geom_point(size = 2)+
+  geom_line()+
+  facet_wrap(~type)+
+    labs(y = 'log likelihood', title = "E2: model likelihoods") +
+    theme_few() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+         aspect.ratio = 1.5) 
+
+ggsave("../../analysis/plots/exp2_plot.pdf", e2_plot)
+
+```
+## item analysis
+```{r}
+e2_behavioral = e2_clues %>% select(wordpair, clue, clueCount) %>%
+  group_by(wordpair) %>%
+  slice_max(clueCount) %>% group_by(wordpair) %>% slice(1) %>%
+  mutate(model = "behavioral") %>% select(wordpair, model, clue)
+
+e2_top_predictions = e2_combined_models %>%
+  group_by(wordpair, model) %>%
+  slice_max(value)%>%
+  group_by(wordpair, model) %>%
+  slice(1) %>% select(wordpair, model, clue) %>%
+  rbind(e2_behavioral)%>%
+  pivot_wider(names_from = model, values_from = clue)
+
+e2_top_predictions %>%
+  mutate(walk_score = ifelse(`walk-only` == behavioral, 1,0),
+         nonRSA_score = ifelse(nonRSA == behavioral, 1, 0),
+         RSA_score = ifelse(RSA == behavioral, 1, 0))  %>%
+  pivot_longer(names_to = "score", cols=c(walk_score, nonRSA_score, RSA_score))%>%
+  group_by(score)%>%
+  summarise_at(vars(value), mean)
+
+## correlation: RSA correlates best with clueCounts
+e2_combined_models %>% left_join(targets)%>%
+  group_by(model) %>%
+  summarize(cor(value, clueCount))
+```
+

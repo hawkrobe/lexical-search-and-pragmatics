@@ -1,0 +1,122 @@
+---
+title: "Search and pragmatics in Connector"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+# Imports
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(ggthemes)
+setwd('/Users/abhilashakumar/connector-pragmatics-search')
+targets = read_csv("data/targets.csv") %>% select(wordpair, Level)
+```
+
+```{r}
+softmax_t = function (x, tau){
+  e_x = exp(x*tau)
+  axis_sum = sum(e_x)
+  return (e_x / axis_sum)
+}
+```
+
+# E3: targeted endorsements
+
+```{r}
+setwd('../../data/exp3')
+
+e3_data = read_csv("e3_data_corrected.csv") %>% filter(!is.na(wordpair) & accessibility != "prac")%>%
+  select(wordpair, correctedClue, sona_id, response, condition)%>%
+  mutate(wordpair = gsub(' - ', '-', wordpair),
+         response = as.numeric(response))%>%
+  group_by(wordpair, correctedClue) %>%
+  # sum up all the rating scores, higher sum total means that clue was most preferred
+  summarise_at(vars(response), sum)%>%
+  rename(clue = correctedClue)
+```
+
+## overall patterns
+
+```{r}
+e3_search = e3_data %>% select(wordpair, clue) %>% distinct() %>%
+  left_join(search)%>% filter(!is.na(value))%>%
+      mutate(alpha = "walk-only", model = "walk-only") %>%
+  select(wordpair,model, alpha, budget, type, clue, value)
+
+e3_nonRSA = read_csv("e3_nonRSAprobs.csv")%>% mutate(alpha = as.character(alpha), model = "nonRSA")
+e3_RSA = read_csv("RSAprobs.csv") %>% mutate(alpha = "RSA", model = "RSA")
+
+e3_RSA_nonRSA = rbind(e3_nonRSA, e3_RSA) %>%
+  pivot_longer(names_to = "type", cols = clue_probs_union:clue_probs_intersection) %>%
+  separate(type, into=c("cluep","probs", "type")) %>% select(-c(cluep, probs)) %>%
+  mutate(alpha = as.character(alpha))%>%
+  select(wordpair,model, alpha, budget, type, clue, value)
+
+e3_combined = rbind(e3_search, e3_RSA_nonRSA)%>%
+  left_join(e3_data) %>% left_join(targets) %>%
+  mutate(budget = as.numeric(gsub("[^0-9.-]", "", budget)),
+             LL = log(value)*response)
+
+# histogram
+
+e3_combined %>%
+  ggplot(aes(x = LL, group = model, fill = model)) +
+  geom_histogram(binwidth = 500) + theme_few()
+
+e3_sumLL =e3_combined %>% 
+  group_by(type, alpha, budget) %>%
+  summarize(sumLL = sum(LL)) %>%
+  arrange(desc(sumLL))
+
+e3_plot = e3_sumLL %>%
+  filter(!is.na(type)) %>%
+  ggplot(aes(x = budget, y = sumLL, color = alpha, group = alpha)) +
+  geom_point(size = 2)+
+  geom_line()+
+  facet_wrap(~type)+
+    labs(y = 'log likelihood', title = "E3: model likelihoods") +
+    theme_few() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+         aspect.ratio = 1.5) 
+
+ggsave("../../analysis/plots/exp3_plot.pdf", e3_plot)
+
+```
+
+## item analysis
+
+```{r}
+e3_behavioral = e3_data %>% select(wordpair, clue, response) %>%
+  group_by(wordpair) %>%
+  slice_max(response) %>% group_by(wordpair) %>% slice(1) %>%
+  mutate(model = "behavioral") %>% select(wordpair, model, clue)
+
+e3_top_predictions = e3_combined %>%
+  group_by(wordpair, model) %>%
+  slice_max(LL)%>%
+  group_by(wordpair, model) %>%
+  slice(1) %>% select(wordpair, model, clue) %>%
+  rbind(e3_behavioral)%>%
+  pivot_wider(names_from = model, values_from = clue)
+
+e3_top_predictions %>%
+  mutate(walk_score = ifelse(`walk-only` == behavioral, 1,0),
+         nonRSA_score = ifelse(nonRSA == behavioral, 1, 0),
+         RSA_score = ifelse(RSA == behavioral, 1, 0))  %>%
+  pivot_longer(names_to = "score", cols=c(walk_score, nonRSA_score, RSA_score))%>%
+  group_by(score)%>%
+  summarise_at(vars(value), mean)
+
+## correlation: RSA correlates best with clueCounts
+e3_combined %>%
+  filter(!is.na(value))%>%
+  group_by(model) %>%
+  summarize(cor(value, response))
+```
+
+
+
