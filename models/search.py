@@ -1,4 +1,5 @@
 import random
+from random import randrange
 import os
 import json
 import pickle
@@ -7,11 +8,11 @@ import walker
 import math
 import warnings
 import scipy.spatial.distance
-
+from heapq import nlargest
 import pandas as pd
 import numpy as np
 import networkx as nx
-
+import math
 from collections import defaultdict
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -165,12 +166,186 @@ class SWOW:
       ],
       axis=1
     ).to_csv('/'.join(data_path.split('/')[:-1])+'/scores.csv')
+  
+  def midpoint_scores(self, w1, w2):
+    # import swow associative embeddings
+    embeddings = pd.read_csv("../data/swow_associative_embeddings.csv").transpose().values
+    # import vocab
+    vocab = pd.read_csv("../data/vocab.csv")
+    w1_vec = embeddings[list(vocab.Word).index(w1)]
+    w2_vec = embeddings[list(vocab.Word).index(w2)]
+    midpoint = (w1_vec + w2_vec)/2
+    midpoint = midpoint.reshape((1, embeddings.shape[1]))
+    similarities = 1 - scipy.spatial.distance.cdist(midpoint, embeddings, 'cosine')
+    y = np.array(similarities)
+    y_sorted = np.argsort(-y).flatten() ## gives sorted indices
+    closest_words = [list(vocab.Word)[i] for i in y_sorted]
+    return closest_words
+
+  def save_midpoint_scores(self, data_path):
+    expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
+    scores = defaultdict(list)
+    rows = []
+    for name, group in expdata.groupby('wordpair') :
+      closest_to_midpoint = self.midpoint_scores(group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
+      for search_budget in self.powers_of_two(1000) :
+        print("search_budget=",search_budget)
+        clue_list = group['correctedClue'].to_numpy()
+        for clue in clue_list:
+          if clue in closest_to_midpoint[:search_budget]:
+            prop = 1- closest_to_midpoint[:search_budget].index(clue) / len(closest_to_midpoint[:search_budget])
+            scores['mid' + str(search_budget)].append(prop)
+          else:
+            scores['mid' + str(search_budget)].append(0)
+      rows.append(group)
+    
+    pd.concat(
+      [
+        pd.concat(rows,axis=0,ignore_index=True),
+        pd.DataFrame.from_dict(scores)
+      ],
+      axis=1
+    ).to_csv('/'.join(data_path.split('/')[:-1])+'/midpoint_scores.csv')
+
+
+  def save_frequency_scores(self,data_path):
+    expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
+    scores = defaultdict(list)
+    rows = []
+    freq = list(pd.read_csv("../data/vocab.csv").sort_values(by="LgSUBTLWF", ascending=False)["Word"])
+    print(freq)
+    # sort by frequency 
+    for name, group in expdata.groupby('wordpair') :
+      for search_budget in self.powers_of_two(1000) :
+        print("search_budget=",search_budget)
+        clue_list = group['correctedClue'].to_numpy()
+        for clue in clue_list:
+          if clue in freq[:search_budget]:
+            prop = 1 - freq[:search_budget].index(clue) / len(freq[:search_budget])
+            scores['freq' + str(search_budget)].append(prop)
+          else:
+            scores['freq' + str(search_budget)].append(0)
+      rows.append(group)
+    
+    pd.concat(
+      [
+        pd.concat(rows,axis=0,ignore_index=True),
+        pd.DataFrame.from_dict(scores)
+      ],
+      axis=1
+    ).to_csv('/'.join(data_path.split('/')[:-1])+'/freq_scores.csv')
+
+  
+  def get_example_walk(self, w1, w2):
+    target_indices = self.get_nodes_by_word([w1, w2])
+    walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist()
+    random_index =  randrange(0, 999)
+    w1_walk = self.get_words_by_node(walks[random_index])
+    w2_walk = self.get_words_by_node(walks[random_index+1])
+
+    intersection_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
+    union_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
+
+    for search_budget in self.powers_of_two(1000) :
+        intersection = list(set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget]))
+        intersection_counts[search_budget] = intersection
+        union = list(set(w1_walk[: search_budget]).union(w2_walk[: search_budget]))
+        union_counts[search_budget] = union
+
+    with open('../data/walk_data/example_intersection.json', 'w') as f:
+      json.dump(intersection_counts, f)
+
+    with open('../data/walk_data/example_union.json', 'w') as f:
+      json.dump(union_counts, f)
+
+    with open('../data/walk_data/example_walk.json', 'w') as f:
+      json.dump({w1_walk[0]:w1_walk, w2_walk[0]: w2_walk}, f)
+  
+  def visualize(self, w1, w2):
+    self.get_example_walk(w1,w2)
+    with open('../data/walk_data/example_walk.json') as json_file:
+      walks = json.load(json_file)
+    with open('../data/walk_data/example_union.json') as json_file:
+      union = json.load(json_file)
+    with open('../data/walk_data/example_intersection.json') as json_file:
+      intersection = json.load(json_file)
+    
+    labels = nx.get_node_attributes(self.graph, 'word')
+  
+    sub = list(set(walks[w1] + walks[w2]))
+    sub_indices = self.get_nodes_by_word(sub)
+
+    X = self.graph.subgraph(sub_indices)
+    
+    X = nx.relabel_nodes(X, labels)
+    
+    
+
+    it1 = walks[w1][:17]
+    w1_walk_edges = list(zip(it1, it1[1:]))
+    Y = X.subgraph(it1)
+    Y_edges = list(Y.edges())
+    Z1 = nx.Graph(Y)
+    Z1.remove_edges_from(Y_edges)
+    Z1.add_edges_from(w1_walk_edges)
+
+    it2 = walks[w2][:17]
+    w2_walk_edges = list(zip(it2, it2[1:]))
+    Y = X.subgraph(it2)
+    Y_edges = list(Y.edges())
+    Z2 = nx.Graph(Y)
+    Z2.remove_edges_from(Y_edges)
+    Z2.add_edges_from(w2_walk_edges)
+
+    intX = intersection['256']
+    int_graph =X.subgraph(intX)
+    int_graph2 = nx.Graph(int_graph)
+    int_graph2.remove_edges_from(list(Z1.edges()))
+    int_graph2.remove_edges_from(list(Z2.edges()))
+
+    unionX =union['256']
+    union_graph =X.subgraph(unionX)
+    union_graph2 = nx.Graph(union_graph)
+    union_graph2.remove_edges_from(list(Z1.edges()))
+    int_graph2.remove_edges_from(list(Z2.edges()))
+
+    pos = nx.spring_layout(X, k=5/math.sqrt(X.order()))
+    # draw main graph
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(12,12))
+    ax = plt.subplot(111)
+
+    nx.draw_networkx(X.subgraph(walks[w1]), pos=pos, font_size=1, node_color='#DDE6FF', font_color='0.9', node_size=0.1,edge_color = '#DDE6FF')
+    nx.draw_networkx(X.subgraph(walks[w2]), pos=pos, font_size=1, node_color='#EEFBE8', font_color='0.9', node_size=0.1,edge_color = '#EEFBE8')
+
+    nx.draw_networkx(union_graph2, pos=pos, font_size=12, node_color='#FADD9E', font_color='black', node_size = 5, edge_color = '#FADD9E')
+    nx.draw_networkx(int_graph2, pos=pos, font_size=12, node_color='#FADD9E', font_color='black', node_size = 5, edge_color = '#FADD9E')
+    
+
+    nx.draw_networkx(Z1, pos=pos, font_size=12, node_color='red', font_color='red', edge_color = "red" , node_size = 5)
+    nx.draw_networkx(Z2, pos=pos, font_size=12, node_color='blue', font_color='blue', edge_color = "blue" , node_size = 5)
+
+    plt.tight_layout()
+    plt.savefig("visualize_graph.png", format="PNG")
+    #plt.show()
+
+
+    
+
+
+
 
 
 if __name__ == "__main__":
   # current dir is models
   swow = SWOW('../data')
   np.random.seed(44)
-#  swow.save_scores('../data/exp2/e2_corrected.csv')
-  swow.save_scores('../data/exp1/e1_data_long.csv')
+  #swow.save_scores('../data/exp2/e2_corrected.csv')
+  #swow.save_scores('../data/exp1/e1_data_long.csv')
   #swow.save_candidates()
+  #swow.midpoint_scores('happy','sad')
+  #swow.save_midpoint_scores('../data/exp1/e1_data_long.csv')
+  #swow.save_frequency_scores('../data/exp1/e1_data_long.csv')
+  #swow.get_example_walk("happy", "sad")
+  swow.visualize('cave', 'knight')

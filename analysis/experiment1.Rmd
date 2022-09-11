@@ -1,6 +1,8 @@
 ---
 title: "E1: online candidate generation"
 output: html_notebook
+editor_options: 
+  chunk_output_type: inline
 ---
 
 # Imports
@@ -10,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 library(tidyverse)
 library(ggthemes)
 library(tidyboot)
+library(here)
 targets = read_csv(here("data/targets.csv")) %>% select(wordpair, Level)
 ```
 
@@ -31,6 +34,44 @@ read_csv(here("data/exp1/scores.csv")) %>%
   group_by(budget, Level, variable) %>%
   tidyboot_mean(value,nboot=100) %>%
   separate(budget, into = c('strategy', 'budget')) %>%
+  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = variable, fill = variable)) +
+    geom_line(size=1, position = 'dodge') +
+    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
+    facet_grid(strategy ~ Level, scales = 'free') +
+    theme_few() +
+    scale_color_few() +
+    labs(x = 'budget', y = 'visit score')
+```
+
+# Examine midpoint scores
+
+```{r}
+ read_csv(here("data/exp1/midpoint_scores.csv"))%>% select(-c(1,2)) %>% distinct() %>%
+  gather(budget, value,`mid2`:`mid512`) %>%
+  filter(variable %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueOption4')) %>%
+  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
+  group_by(budget, Level, variable) %>%
+  tidyboot_mean(value,nboot=100) %>%
+  separate(budget, into = c('strategy', 'budget'), sep = "(?<=[A-Za-z])(?=[0-9])") %>%
+  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = variable, fill = variable)) +
+    geom_line(size=1, position = 'dodge') +
+    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
+    facet_grid(strategy ~ Level, scales = 'free') +
+    theme_few() +
+    scale_color_few() +
+    labs(x = 'budget', y = 'visit score')
+```
+
+# Examine frequency scores
+
+```{r}
+ read_csv(here("data/exp1/freq_scores.csv"))%>% select(-c(1,2)) %>% distinct() %>%
+  gather(budget, value,`freq2`:`freq512`) %>%
+  filter(variable %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueOption4')) %>%
+  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
+  group_by(budget, Level, variable) %>%
+  tidyboot_mean(value,nboot=100) %>%
+  separate(budget, into = c('strategy', 'budget'), sep = "(?<=[A-Za-z])(?=[0-9])") %>%
   ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = variable, fill = variable)) +
     geom_line(size=1, position = 'dodge') +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
