@@ -34,7 +34,7 @@ class SWOW:
     self.target_df = pd.read_csv(f"{data_path}/targets.csv".format())
     self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
     self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
-
+    self.vocab = list(pd.read_csv("../data/vocab.csv").Word)
     self.load_graph(data_path)
     self.index_to_name = {k: v['word'] for k,v in self.graph.nodes(data=True)}
     self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
@@ -125,8 +125,8 @@ class SWOW:
     target_indices = self.get_nodes_by_word([w1, w2])
     walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist() 
     
-    union_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)} # TODO fine if lambda = 0?
-    intersection_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
+    union_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} # TODO fine if lambda = 0?
+    intersection_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)}
 
     for search_budget in self.powers_of_two(1000) :
       for w1_walk, w2_walk in self.chunk(walks, 2) : # Chunk makes this fn take in two walks at a time
@@ -135,7 +135,17 @@ class SWOW:
         for element in set(w1_walk[: search_budget]).union(w2_walk[: search_budget]) :
           union_counts[search_budget][element] += 1
 
-    return union_counts, intersection_counts
+    # for a given search_budget (e.g. 10 steps)
+    # normalize by the total visitation counts
+    # TODO: convert index to word here
+    intersection_counts_normalized = {
+      index : count / sum(d.values())
+      for (search_budget, d) in intersection_counts.items()
+      for (index, count) in d.items()
+    }
+    # TODO: do the same thing for union_counts
+    # TODO: ensure the format
+    return union_counts, intersection_counts_normalized
 
   def clue_score(self, clues, w1, w2): 
     '''
@@ -211,15 +221,14 @@ class SWOW:
     # import swow associative embeddings
     embeddings = pd.read_csv("../data/swow_associative_embeddings.csv").transpose().values
     # import vocab
-    vocab = pd.read_csv("../data/vocab.csv")
-    w1_vec = embeddings[list(vocab.Word).index(w1)]
-    w2_vec = embeddings[list(vocab.Word).index(w2)]
+    w1_vec = embeddings[self.vocab.index(w1)]
+    w2_vec = embeddings[self.vocab.index(w2)]
     midpoint = (w1_vec + w2_vec)/2
     midpoint = midpoint.reshape((1, embeddings.shape[1]))
     similarities = 1 - scipy.spatial.distance.cdist(midpoint, embeddings, 'cosine')
     y = np.array(similarities)
     y_sorted = np.argsort(-y).flatten() ## gives sorted indices
-    closest_words = [list(vocab.Word)[i] for i in y_sorted]
+    closest_words = [self.vocab[i] for i in y_sorted]
     return closest_words
 
   def save_midpoint_scores(self, data_path):
@@ -380,6 +389,7 @@ if __name__ == "__main__":
   # current dir is models
   swow = SWOW('../data')
   np.random.seed(44)
+  swow.union_intersection_candidates('lion', 'tiger')
   #swow.save_scores('../data/exp2/e2_corrected.csv')
   #swow.save_scores('../data/exp1/e1_data_long.csv')
   #swow.save_candidates()
@@ -387,4 +397,4 @@ if __name__ == "__main__":
   #swow.save_midpoint_scores('../data/exp1/e1_data_long.csv')
   #swow.save_frequency_scores('../data/exp1/e1_data_long.csv')
   #swow.get_example_walk("happy", "sad")
-  swow.visualize('cave', 'knight')
+  #swow.visualize('cave', 'knight')
