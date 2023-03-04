@@ -78,7 +78,7 @@ class SWOW:
     indices = self.get_nodes_by_word(self.target_words)
     self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices)
 
-    with open('data/walk_data/walks.pkl', 'wb') as f:
+    with open('../data/walk_data/walks.pkl', 'wb') as f:
       pickle.dump(self.rw, f)
 
   def chunk(self, l, n):
@@ -116,36 +116,47 @@ class SWOW:
     Args:
       w1, w2: target words.
     Returns:
-      union_counts: dict of union { budget : {word:weight} }, e.g. {"2" : {'apple' : 3}}
-      intersection_count: dict of intersection { budget : {word:weight} }
-    
+      union_counts, intersection_count : dict of  { budget : {wordid:weight} }    
     '''
 
     # Retrieve paths that start with target word
     target_indices = self.get_nodes_by_word([w1, w2])
     walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist() 
     
-    union_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} # TODO fine if lambda = 0?
+    union_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} 
     intersection_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)}
 
-    for search_budget in self.powers_of_two(1000) :
-      for w1_walk, w2_walk in self.chunk(walks, 2) : # Chunk makes this fn take in two walks at a time
+    for search_budget in self.powers_of_two(1000) :  
+      for w1_walk, w2_walk in self.chunk(walks, 2) : 
         for element in set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget]) :
           intersection_counts[search_budget][element] += 1
         for element in set(w1_walk[: search_budget]).union(w2_walk[: search_budget]) :
           union_counts[search_budget][element] += 1
 
+    
+    # intersection_ids = [
+    #   index for (search_budget, d) in intersection_counts.items()
+    #   for (index, count) in d.items()
+    # ]
+    # intersection_words = self.get_words_by_node(intersection_ids)
+
+
     # for a given search_budget (e.g. 10 steps)
-    # normalize by the total visitation counts
-    # TODO: convert index to word here
+    # normalize by the total visitation counts and convert index to word
+    union_counts_normalized = {
+      self.get_words_by_node([index])[0] : count / sum(d.values())
+      for (search_budget, d) in union_counts.items()
+      for (index, count) in d.items()
+    }
+
     intersection_counts_normalized = {
-      index : count / sum(d.values())
+      self.get_words_by_node([index])[0] : count / sum(d.values())
       for (search_budget, d) in intersection_counts.items()
       for (index, count) in d.items()
     }
-    # TODO: do the same thing for union_counts
+
     # TODO: ensure the format
-    return union_counts, intersection_counts_normalized
+    return union_counts_normalized, intersection_counts_normalized
 
   def clue_score(self, clues, w1, w2): 
     '''
@@ -380,16 +391,16 @@ class SWOW:
 
 
     
-
-
-
-
-
 if __name__ == "__main__":
   # current dir is models
   swow = SWOW('../data')
   np.random.seed(44)
+
   swow.union_intersection_candidates('lion', 'tiger')
+  # unions, intersections = swow.union_intersection_candidates('lion', 'tiger')
+    # print(unions)
+    # print(intersections)
+
   #swow.save_scores('../data/exp2/e2_corrected.csv')
   #swow.save_scores('../data/exp1/e1_data_long.csv')
   #swow.save_candidates()
