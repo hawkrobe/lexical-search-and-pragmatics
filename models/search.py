@@ -30,6 +30,9 @@ class SWOW:
     Args:
       data_path: path to csv containing target words.  
     '''
+    
+    print("Init path:", os.path.abspath('.'))
+
     # import target words
     self.target_df = pd.read_csv(f"{data_path}/targets.csv".format())
     self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
@@ -143,21 +146,31 @@ class SWOW:
 
     # for a given search_budget (e.g. 10 steps)
     # normalize by the total visitation counts and convert index to word
-    self.get_words_by_node([index])[0]
-    union_counts_normalized = { 
-      search_budget : { index : count / sum(d.values()) }
-      for (search_budget, d) in union_counts.items()
-      for (index, count) in d.items()
-    }
+    # TODO Convert the node IDs to strings? self.get_words_by_node([index])[0]
 
-    intersection_counts_normalized = {
-      search_budget : { index : count / sum(d.values()) }
-      for (search_budget, d) in intersection_counts.items()
-      for (index, count) in d.items()
-    }
+    union_counts_normalized = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} 
 
-    return union_counts, None
-    # TODO: ensure the format
+    for search_budget, d in union_counts.items():
+      for index, count in d.items():
+        union_counts_normalized[search_budget][index] = count / sum(d.values()) 
+
+    intersection_counts_normalized = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} 
+
+    for search_budget, d in intersection_counts.items():
+      for index, count in d.items():
+        intersection_counts_normalized[search_budget][index] = count / sum(d.values()) 
+
+    # # TODO test w/ clue_score
+    # for(search_budget, d) in union_counts_normalized.items():
+    #     print("budget",  search_budget)
+    #     print("d", d) # only storing last value eg word w/ ID 12217 
+    #     break
+
+    # intersection_counts_normalized = {
+    #   search_budget : { index : count / sum(d.values()) }
+    #   for (search_budget, d) in intersection_counts.items()
+    #   for (index, count) in d.items()
+    # }
     return union_counts_normalized, intersection_counts_normalized
 
   def clue_score(self, clues, w1, w2): 
@@ -170,8 +183,11 @@ class SWOW:
     Returns: 
       (union score, intersection score) of word
     '''
-    clue_indices = self.get_nodes_by_word(clues)
+    clue_indices = self.get_nodes_by_word(clues) 
     union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
+
+    print(clue_indices)
+
     return ({budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in union_counts.items()},
             {budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in intersection_counts.items()})
 
@@ -394,16 +410,23 @@ class SWOW:
     
 if __name__ == "__main__":
   # current dir is models
+  # swow = SWOW('../data') 
 
-  swow = SWOW('../data')
+  # Chang pathed for debugging
+  os.chdir("./models")
+  print("Main method path: ", os.path.abspath('.'))
+
+  swow = SWOW('../data') 
   np.random.seed(44)
 
   # swow.union_intersection_candidates('cave', 'knight')
-  unions, intersections = swow.union_intersection_candidates('cave', 'knight')
-  print(unions)
+  unions, intersections = swow.union_intersection_candidates('cave', 'knight') # TODO ur inputs
+  # print(unions)
   # print(intersections)
+  print(swow.clue_score(["animal"], "lion", "tiger")) 
+  # swow.save_scores('../data/TEST/e1_data_long.csv') # TODO eg e1 contains OOVs. search for OOV words? Run whole file, wil have Nones
+  # TODO Nones when outputing scores files 
 
-  # swow.save_scores('../data/TEST/e1_data_long.csv')
 
   # swow.save_scores('../data/exp2/e2_corrected.csv')
   # swow.save_scores('../data/exp1/e1_data_long.csv')
