@@ -143,18 +143,20 @@ class SWOW:
 
     # for a given search_budget (e.g. 10 steps)
     # normalize by the total visitation counts and convert index to word
-    union_counts_normalized = {
-      self.get_words_by_node([index])[0] : count / sum(d.values())
+    self.get_words_by_node([index])[0]
+    union_counts_normalized = { 
+      search_budget : { index : count / sum(d.values()) }
       for (search_budget, d) in union_counts.items()
       for (index, count) in d.items()
     }
 
     intersection_counts_normalized = {
-      self.get_words_by_node([index])[0] : count / sum(d.values())
+      search_budget : { index : count / sum(d.values()) }
       for (search_budget, d) in intersection_counts.items()
       for (index, count) in d.items()
     }
 
+    return union_counts, None
     # TODO: ensure the format
     return union_counts_normalized, intersection_counts_normalized
 
@@ -293,7 +295,6 @@ class SWOW:
       ],
       axis=1
     ).to_csv('/'.join(data_path.split('/')[:-1])+'/freq_scores.csv')
-
   
   def get_example_walk(self, w1, w2):
     target_indices = self.get_nodes_by_word([w1, w2])
@@ -393,16 +394,19 @@ class SWOW:
     
 if __name__ == "__main__":
   # current dir is models
+
   swow = SWOW('../data')
   np.random.seed(44)
 
-  swow.union_intersection_candidates('lion', 'tiger')
-  # unions, intersections = swow.union_intersection_candidates('lion', 'tiger')
-    # print(unions)
-    # print(intersections)
+  # swow.union_intersection_candidates('cave', 'knight')
+  unions, intersections = swow.union_intersection_candidates('cave', 'knight')
+  print(unions)
+  # print(intersections)
 
-  #swow.save_scores('../data/exp2/e2_corrected.csv')
-  #swow.save_scores('../data/exp1/e1_data_long.csv')
+  # swow.save_scores('../data/TEST/e1_data_long.csv')
+
+  # swow.save_scores('../data/exp2/e2_corrected.csv')
+  # swow.save_scores('../data/exp1/e1_data_long.csv')
   #swow.save_candidates()
   #swow.midpoint_scores('happy','sad')
   #swow.save_midpoint_scores('../data/exp1/e1_data_long.csv')
