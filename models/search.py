@@ -7,13 +7,19 @@ import itertools
 import walker
 import math
 import warnings
-import scipy.spatial.distance
+import scipy.spatial.distance as distance
+import scipy
 from heapq import nlargest
 import pandas as pd
 import numpy as np
 import networkx as nx
 import math
 from collections import defaultdict
+import difflib
+import gensim.downloader as api
+import time
+
+
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -173,6 +179,54 @@ class SWOW:
     # }
     return union_counts_normalized, intersection_counts_normalized
 
+  def check_words(self, data_file, column_name):
+    '''
+    Checks if words are in vocab and find a close replacement if a word is not in vocab
+
+    Args:
+      data_file: path to a csv file
+      column_name: column name of words/clues we need to check
+
+    Returns:
+     new_datafile: a pandas dataframe with a column of words/clues that are in vocab
+    '''
+    # read in data file
+    data_file = pd.read_csv(data_file)
+    new_datafile = pd.DataFrame()
+    ## loading fasttext model
+    print("loading fasttext model")
+    start_time = time.time()
+    model = api.load("fasttext-wiki-news-subwords-300")
+    print("model loaded, total time", time.time() - start_time)
+    # keep count of how many times a word is replaced
+    count_corrections = 0
+    for index, row in data_file.iterrows():
+      if row[column_name] in self.vocab:
+        # create new column that records if a correction was made
+        # and duplicates column_name into new column
+        row["corrected"] = "no"
+        row["correctedClue"] = row[column_name]
+        new_datafile = new_datafile.append(row)
+      else:
+        # remove spaces
+        word = row[column_name].strip().replace(" ", "")
+        # use difflib to find the closest word in vocab & compute semantic similarity score with original word
+        closest_word = difflib.get_close_matches(word, self.vocab, n=1, cutoff=0.6)
+        if closest_word and word in model and closest_word[0] in model:
+          # compute similarity score between original word and closest word
+          vectors = model[[word, closest_word[0]]]
+          similarity_score = 1- distance.cosine(vectors[0], vectors[1])
+          # if similarity score is greater than 0.3, replace word with closest word
+          if similarity_score > 0.3:
+            row["corrected"] = "yes"
+            row["correctedClue"] = closest_word[0]
+            new_datafile = new_datafile.append(row)
+            count_corrections += 1
+        else:
+          # if no closest word is found or vector not in model, drop row
+          continue
+    return new_datafile, count_corrections
+
   def clue_score(self, clues, w1, w2): 
     '''
     Extract info for given clue and word-pair.
@@ -186,7 +240,7 @@ class SWOW:
     clue_indices = self.get_nodes_by_word(clues) 
     union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
 
-    print(clue_indices)
+    #print(clue_indices)
 
     return ({budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in union_counts.items()},
             {budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in intersection_counts.items()})
@@ -218,6 +272,72 @@ class SWOW:
 
     with open('../data/walk_data/union_candidates.json', 'w') as f:
       json.dump(unions, f)
+  
+  def get_common_candidates(expdata, resultspath):
+    '''
+    NOT SURE IF THIS IS NEEDED, BUT IT'S HERE JUST IN CASE
+    '''
+    common_candidates = pd.DataFrame()
+
+    with open('../data/walk_data/intersection_candidates.json') as json_file:
+      intersection_dict = json.load(json_file)
+    with open('../data/walk_data/union_candidates.json') as json_file:
+      union_dict = json.load(json_file)
+    
+    for index, row in expdata.iterrows():
+      ID = row['clueGiverID']
+      wordpair = row["wordpair_id"]
+      w1, w2 = wordpair.split("-")
+      reverse_wordpair = w2 + "-" + w1
+      behavioral_clue_list = row["clue_list"]
+      clueFinal = row["clueFinal"]
+      cluedict_union = (union_dict[wordpair] 
+                        if wordpair in union_dict.keys() 
+                        else union_dict[reverse_wordpair])
+      cluedict_intersection = (intersection_dict[wordpair] 
+                               if wordpair in intersection_dict.keys() 
+                               else intersection_dict[reverse_wordpair])
+      budget_types = list(intersection_dict['happy-sad'].keys())
+      
+      for budget in budget_types:
+        
+        cluelist_intersection = []
+        cluelist_union = []
+        intersection_common =  []
+        union_common = []
+        finalclue_index_union = -1
+        finalclue_index_intersection = -1
+        
+        if budget in cluedict_union:
+          cluelist_union = cluedict_union[budget]
+          union_common = list(set(behavioral_clue_list).intersection(cluelist_union))
+          finalclue_index_union = cluelist_union.index(clueFinal) if clueFinal in cluelist_union else -1
+          
+        if budget in cluedict_intersection:
+          cluelist_intersection = cluedict_intersection[budget]
+          intersection_common = list(set(behavioral_clue_list).intersection(cluelist_intersection))
+          finalclue_index_intersection = cluelist_intersection.index(clueFinal) if clueFinal in cluelist_intersection else -1
+          
+
+        common_df = pd.DataFrame({'clueGiverID': [ID]})
+        common_df["wordpair"] = wordpair
+        common_df["Level"] = row["Level"]
+        common_df["clueFinal"] = clueFinal
+        common_df["budget"] = budget
+        common_df["behavioral_clue_list"] = str(behavioral_clue_list)
+        common_df["len_cluelist_behavioral"] = len(behavioral_clue_list)
+        common_df["len_cluelist_union"] = len(cluelist_union)
+        common_df["union_common"] = str(union_common)
+        common_df["len_union_common"] = len(union_common)
+        common_df["finalclue_index_union"] = finalclue_index_union
+        common_df["len_cluelist_intersection"] = len(cluelist_intersection)
+        common_df["intersection_common"] = str(intersection_common)
+        common_df["len_intersection_common"] = len(intersection_common)
+        common_df["finalclue_index_intersection"] = finalclue_index_intersection
+          
+        common_candidates = pd.concat([common_candidates, common_df])
+        common_candidates.to_csv(resultspath, index = False)
+    return common_candidates
 
   def save_scores(self, data_path):
     '''
@@ -229,12 +349,13 @@ class SWOW:
     rows = []
     # look up how often each clue was visited
     for name, group in expdata.groupby('wordpair') :
+      print(name)
       union_score, intersect_score = self.clue_score(group['correctedClue'].to_numpy(), 
                                                      group['Word1'].to_numpy()[0], 
                                                      group['Word2'].to_numpy()[0])
       for key in union_score.keys() :
-        scores['union' + str(key)].extend(union_score[key])
-        scores['intersection' + str(key)].extend(intersect_score[key])
+        scores['union_' + str(key)].extend(union_score[key])
+        scores['intersection_' + str(key)].extend(intersect_score[key])
       rows.append(group)
 
     # save to file
@@ -266,15 +387,15 @@ class SWOW:
     rows = []
     for name, group in expdata.groupby('wordpair') :
       closest_to_midpoint = self.midpoint_scores(group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
-      for search_budget in self.powers_of_two(1000) :
-        print("search_budget=",search_budget)
+      for search_budget in self.powers_of_two(1000) :        
         clue_list = group['correctedClue'].to_numpy()
         for clue in clue_list:
           if clue in closest_to_midpoint[:search_budget]:
-            prop = 1- closest_to_midpoint[:search_budget].index(clue) / len(closest_to_midpoint[:search_budget])
-            scores['mid' + str(search_budget)].append(prop)
+            # divide by total length such that if there are more items in the list, the score is lower
+            prop = (closest_to_midpoint[:search_budget].index(clue) + 1) / len(closest_to_midpoint[:search_budget])
+            scores['mid_' + str(search_budget)].append(prop)
           else:
-            scores['mid' + str(search_budget)].append(0)
+            scores['mid_' + str(search_budget)].append(0)
       rows.append(group)
     
     pd.concat(
@@ -290,18 +411,16 @@ class SWOW:
     scores = defaultdict(list)
     rows = []
     freq = list(pd.read_csv("../data/vocab.csv").sort_values(by="LgSUBTLWF", ascending=False)["Word"])
-    print(freq)
     # sort by frequency 
     for name, group in expdata.groupby('wordpair') :
       for search_budget in self.powers_of_two(1000) :
-        print("search_budget=",search_budget)
         clue_list = group['correctedClue'].to_numpy()
         for clue in clue_list:
           if clue in freq[:search_budget]:
-            prop = 1 - freq[:search_budget].index(clue) / len(freq[:search_budget])
-            scores['freq' + str(search_budget)].append(prop)
+            prop = (freq[:search_budget].index(clue)+ 1) / len(freq[:search_budget])
+            scores['freq_' + str(search_budget)].append(prop)
           else:
-            scores['freq' + str(search_budget)].append(0)
+            scores['freq_' + str(search_budget)].append(0)
       rows.append(group)
     
     pd.concat(
@@ -413,26 +532,30 @@ if __name__ == "__main__":
   # swow = SWOW('../data') 
 
   # Chang pathed for debugging
-  os.chdir("./models")
-  print("Main method path: ", os.path.abspath('.'))
+  # os.chdir("./models")
+  # print("Main method path: ", os.path.abspath('.'))
 
   swow = SWOW('../data') 
   np.random.seed(44)
 
-  # swow.union_intersection_candidates('cave', 'knight')
-  unions, intersections = swow.union_intersection_candidates('cave', 'knight') # TODO ur inputs
-  # print(unions)
-  # print(intersections)
-  print(swow.clue_score(["animal"], "lion", "tiger")) 
-  # swow.save_scores('../data/TEST/e1_data_long.csv') # TODO eg e1 contains OOVs. search for OOV words? Run whole file, wil have Nones
-  # TODO Nones when outputing scores files 
+  ### EXP 1 CODE ###
+  # newdata, corrections = swow.check_words('../data/exp1/e1_data_long.csv', "Clue1")
+  # newdata.to_csv("../data/exp1/exp1_corrected.csv")
+  # print("corrections: ", corrections)
+  # swow.save_scores('../data/exp1/exp1_corrected.csv') 
+  # swow.save_midpoint_scores('../data/exp1/exp1_corrected.csv')
+  # swow.save_frequency_scores('../data/exp1/exp1_corrected.csv')
+  swow.save_candidates()
 
+  # TODO:
+  # make midpoint + freq baselines comparable
 
+  ### EXP 2 CODE ###
   # swow.save_scores('../data/exp2/e2_corrected.csv')
-  # swow.save_scores('../data/exp1/e1_data_long.csv')
+  
   #swow.save_candidates()
   #swow.midpoint_scores('happy','sad')
-  #swow.save_midpoint_scores('../data/exp1/e1_data_long.csv')
+  
   #swow.save_frequency_scores('../data/exp1/e1_data_long.csv')
   #swow.get_example_walk("happy", "sad")
   #swow.visualize('cave', 'knight')
