@@ -10,4 +10,4 @@ conda activate connector
 conda env list
 ```
 
-2. Download the data .zip
+2. Download the data .zip from [here]()
