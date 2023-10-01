@@ -25,8 +25,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class SWOW:
   '''
-  Class description:
-    Class model to execute random walks from association norms given by the SWOW model. 
+  Run random walks on the small world of words dataset of association norms
   '''
 
   def __init__(self, data_path):
@@ -85,10 +84,19 @@ class SWOW:
     Runs n_walks independent random walks of walk_len length from each words.
     '''
     indices = self.get_nodes_by_word(self.target_words)
-    self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices)
+    self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices, alpha = 0.1)
 
     with open('../data/walk_data/walks.pkl', 'wb') as f:
       pickle.dump(self.rw, f)
+
+  def save_candidates(self) :
+    for word1, word2 in zip(self.target_df['Word1'], self.target_df['Word2']) :
+      w1_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word1])])
+      w2_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word2])])
+      d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(10)}
+      d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(10)})
+      with open(f'../data/{word1}-{word2}-walks.json', 'w', encoding ='utf8') as json_file:
+        json.dump(d, json_file, ensure_ascii = False)
 
   def chunk(self, l, n):
     '''
@@ -120,7 +128,7 @@ class SWOW:
   def union_intersection_candidates(self, w1, w2):
     '''
     Compares two walks for a given word pair, finding union and intersection of candidate words in both paths
-    for path lengths budgeted from 2 - 2^1000. Returns candidate words with likelihoods of being visited. 
+    for path lengths budgeted from 2 - 2^10. Returns candidate words with likelihoods of being visited.
 
     Args:
       w1, w2: target words.
@@ -130,102 +138,26 @@ class SWOW:
 
     # Retrieve paths that start with target word
     target_indices = self.get_nodes_by_word([w1, w2])
-    walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist() 
-    
-    union_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} 
-    intersection_counts = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)}
+    w1_walks = np.array([x for x in self.rw if x[0] == target_indices[0]]).tolist()
+    w2_walks = np.array([x for x in self.rw if x[0] == target_indices[1]]).tolist()
 
-    for search_budget in self.powers_of_two(1000) :  
-      for w1_walk, w2_walk in self.chunk(walks, 2) : 
-        for element in set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget]) :
-          intersection_counts[search_budget][element] += 1
-        for element in set(w1_walk[: search_budget]).union(w2_walk[: search_budget]) :
-          union_counts[search_budget][element] += 1
+    union_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
+    intersect_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
 
-    
-    # intersection_ids = [
-    #   index for (search_budget, d) in intersection_counts.items()
-    #   for (index, count) in d.items()
-    # ]
-    # intersection_words = self.get_words_by_node(intersection_ids)
+    # Count union/intersection appearances
+    for w1_walk, w2_walk in zip(w1_walks, w2_walks) :
+      union_counts = {budget: defaultdict(int) for budget in self.powers_of_two(10000)}
+      intersect_counts =  {budget: defaultdict(int) for budget in self.powers_of_two(10000)}
+      for search_budget in self.powers_of_two(10000) :
+        intersect = set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget])
+        union = set(w1_walk[: search_budget]).union(w2_walk[: search_budget])
+        for node in range(len(self.vocab)) :
+          intersect_avg[search_budget][node] += [(1/len(intersect) + 0.001) if node in intersect else 0.0000001]
+          union_avg[search_budget][node] += [(1/len(union) + 0.001) if node in union else 0.0000001]
 
+    return ({k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in union_avg.items()},
+            {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in intersect_avg.items()})
 
-    # for a given search_budget (e.g. 10 steps)
-    # normalize by the total visitation counts and convert index to word
-    # TODO Convert the node IDs to strings? self.get_words_by_node([index])[0]
-
-    union_counts_normalized = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} 
-
-    for search_budget, d in union_counts.items():
-      for index, count in d.items():
-        union_counts_normalized[search_budget][index] = count / sum(d.values()) 
-
-    intersection_counts_normalized = {budget : {i: 0.0001 for i in range(len(self.vocab))} for budget in self.powers_of_two(1000)} 
-
-    for search_budget, d in intersection_counts.items():
-      for index, count in d.items():
-        intersection_counts_normalized[search_budget][index] = count / sum(d.values()) 
-
-    # # TODO test w/ clue_score
-    # for(search_budget, d) in union_counts_normalized.items():
-    #     print("budget",  search_budget)
-    #     print("d", d) # only storing last value eg word w/ ID 12217 
-    #     break
-
-    # intersection_counts_normalized = {
-    #   search_budget : { index : count / sum(d.values()) }
-    #   for (search_budget, d) in intersection_counts.items()
-    #   for (index, count) in d.items()
-    # }
-    return union_counts_normalized, intersection_counts_normalized
-
-  def check_words(self, data_file, column_name):
-    '''
-    Checks if words are in vocab and find a close replacement if a word is not in vocab
-
-    Args:
-      data_file: path to a csv file
-      column_name: column name of words/clues we need to check
-
-    Returns:
-     new_datafile: a pandas dataframe with a column of words/clues that are in vocab
-    '''
-    # read in data file
-    data_file = pd.read_csv(data_file)
-    new_datafile = pd.DataFrame()
-    ## loading fasttext model
-    print("loading fasttext model")
-    start_time = time.time()
-    model = api.load("fasttext-wiki-news-subwords-300")
-    print("model loaded, total time", time.time() - start_time)
-    # keep count of how many times a word is replaced
-    count_corrections = 0
-    for index, row in data_file.iterrows():
-      if row[column_name] in self.vocab:
-        # create new column that records if a correction was made
-        # and duplicates column_name into new column
-        row["corrected"] = "no"
-        row["correctedClue"] = row[column_name]
-        new_datafile = new_datafile.append(row)
-      else:
-        # remove spaces
-        word = row[column_name].strip().replace(" ", "")
-        # use difflib to find the closest word in vocab & compute semantic similarity score with original word
-        closest_word = difflib.get_close_matches(word, self.vocab, n=1, cutoff=0.6)
-        if closest_word and word in model and closest_word[0] in model:
-          # compute similarity score between original word and closest word
-          vectors = model[[word, closest_word[0]]]
-          similarity_score = 1- distance.cosine(vectors[0], vectors[1])
-          # if similarity score is greater than 0.3, replace word with closest word
-          if similarity_score > 0.3:
-            row["corrected"] = "yes"
-            row["correctedClue"] = closest_word[0]
-            new_datafile = new_datafile.append(row)
-            count_corrections += 1
-        else:
-          # if no closest word is found or vector not in model, drop row
-          continue
-    return new_datafile, count_corrections
 
   def clue_score(self, clues, w1, w2): 
     '''
@@ -237,107 +169,10 @@ class SWOW:
     Returns: 
       (union score, intersection score) of word
     '''
-    clue_indices = self.get_nodes_by_word(clues) 
+    clue_indices = self.get_nodes_by_word(clues)
     union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
-
-    #print(clue_indices)
-
     return ({budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in union_counts.items()},
             {budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in intersection_counts.items()})
-
-  def save_candidates(self):
-    '''
-    Computes union and intersection for all word pairs. Tracks of the number of times a word is visited for different budgets, 
-    across all word pairs’ walks. Saves words into union_candidates.json.
-    '''
-    
-    # Loop through word pairs
-    unions = {}
-    intersections = {}
-    for w1, w2 in  zip(self.target_df['Word1'], self.target_df['Word2']) :
-      print(w1,w2)
-      union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
-      union_candidates = {budget: sorted(d.items(), key=lambda k_v: k_v[1], reverse=True)
-                          for (budget, d) in union_counts.items()}
-      union_nodes = {budget: [x[0] for x in d] for (budget, d) in union_candidates.items()}
-      unions[w1 + '-' + w2] = {'budget=' + str(budget): self.get_words_by_node(d) for (budget, d) in union_nodes.items()}
-
-      intersection_candidates = {budget: sorted(d.items(), key=lambda k_v: k_v[1], reverse=True)
-                                 for (budget, d) in intersection_counts.items()}
-      intersection_nodes = {budget: [x[0] for x in d] for (budget, d) in intersection_candidates.items()}
-      intersections[w1 + '-' + w2] = {'budget=' + str(budget): self.get_words_by_node(d) for (budget, d) in intersection_nodes.items()}
-
-    with open('../data/walk_data/intersection_candidates.json', 'w') as f:
-      json.dump(intersections, f)
-
-    with open('../data/walk_data/union_candidates.json', 'w') as f:
-      json.dump(unions, f)
-  
-  def get_common_candidates(expdata, resultspath):
-    '''
-    NOT SURE IF THIS IS NEEDED, BUT IT'S HERE JUST IN CASE
-    '''
-    common_candidates = pd.DataFrame()
-
-    with open('../data/walk_data/intersection_candidates.json') as json_file:
-      intersection_dict = json.load(json_file)
-    with open('../data/walk_data/union_candidates.json') as json_file:
-      union_dict = json.load(json_file)
-    
-    for index, row in expdata.iterrows():
-      ID = row['clueGiverID']
-      wordpair = row["wordpair_id"]
-      w1, w2 = wordpair.split("-")
-      reverse_wordpair = w2 + "-" + w1
-      behavioral_clue_list = row["clue_list"]
-      clueFinal = row["clueFinal"]
-      cluedict_union = (union_dict[wordpair] 
-                        if wordpair in union_dict.keys() 
-                        else union_dict[reverse_wordpair])
-      cluedict_intersection = (intersection_dict[wordpair] 
-                               if wordpair in intersection_dict.keys() 
-                               else intersection_dict[reverse_wordpair])
-      budget_types = list(intersection_dict['happy-sad'].keys())
-      
-      for budget in budget_types:
-        
-        cluelist_intersection = []
-        cluelist_union = []
-        intersection_common =  []
-        union_common = []
-        finalclue_index_union = -1
-        finalclue_index_intersection = -1
-        
-        if budget in cluedict_union:
-          cluelist_union = cluedict_union[budget]
-          union_common = list(set(behavioral_clue_list).intersection(cluelist_union))
-          finalclue_index_union = cluelist_union.index(clueFinal) if clueFinal in cluelist_union else -1
-          
-        if budget in cluedict_intersection:
-          cluelist_intersection = cluedict_intersection[budget]
-          intersection_common = list(set(behavioral_clue_list).intersection(cluelist_intersection))
-          finalclue_index_intersection = cluelist_intersection.index(clueFinal) if clueFinal in cluelist_intersection else -1
-          
-
-        common_df = pd.DataFrame({'clueGiverID': [ID]})
-        common_df["wordpair"] = wordpair
-        common_df["Level"] = row["Level"]
-        common_df["clueFinal"] = clueFinal
-        common_df["budget"] = budget
-        common_df["behavioral_clue_list"] = str(behavioral_clue_list)
-        common_df["len_cluelist_behavioral"] = len(behavioral_clue_list)
-        common_df["len_cluelist_union"] = len(cluelist_union)
-        common_df["union_common"] = str(union_common)
-        common_df["len_union_common"] = len(union_common)
-        common_df["finalclue_index_union"] = finalclue_index_union
-        common_df["len_cluelist_intersection"] = len(cluelist_intersection)
-        common_df["intersection_common"] = str(intersection_common)
-        common_df["len_intersection_common"] = len(intersection_common)
-        common_df["finalclue_index_intersection"] = finalclue_index_intersection
-          
-        common_candidates = pd.concat([common_candidates, common_df])
-        common_candidates.to_csv(resultspath, index = False)
-    return common_candidates
 
   def save_scores(self, data_path):
     '''
@@ -349,10 +184,11 @@ class SWOW:
     rows = []
     # look up how often each clue was visited
     for name, group in expdata.groupby('wordpair') :
-      print(name)
-      union_score, intersect_score = self.clue_score(group['correctedClue'].to_numpy(), 
-                                                     group['Word1'].to_numpy()[0], 
-                                                     group['Word2'].to_numpy()[0])
+      union_score, intersect_score = self.clue_score(
+        group['correctedClue'].to_numpy(),
+        group['Word1'].to_numpy()[0],
+        group['Word2'].to_numpy()[0]
+      )
       for key in union_score.keys() :
         scores['union_' + str(key)].extend(union_score[key])
         scores['intersection_' + str(key)].extend(intersect_score[key])
@@ -366,196 +202,46 @@ class SWOW:
       ],
       axis=1
     ).to_csv('/'.join(data_path.split('/')[:-1])+'/scores.csv')
-  
-  def midpoint_scores(self, w1, w2):
-    # import swow associative embeddings
-    embeddings = pd.read_csv("../data/swow_associative_embeddings.csv").transpose().values
-    # import vocab
-    w1_vec = embeddings[self.vocab.index(w1)]
-    w2_vec = embeddings[self.vocab.index(w2)]
-    midpoint = (w1_vec + w2_vec)/2
-    midpoint = midpoint.reshape((1, embeddings.shape[1]))
-    similarities = 1 - scipy.spatial.distance.cdist(midpoint, embeddings, 'cosine')
-    y = np.array(similarities)
-    y_sorted = np.argsort(-y).flatten() ## gives sorted indices
-    closest_words = [self.vocab[i] for i in y_sorted]
-    return closest_words
 
-  def save_midpoint_scores(self, data_path):
+  def save_rank_order(self, data_path, permute = False):
+    '''
+    Tracks of the number of times a word is visited for different budgets,
+    across all word pairs’ walks.
+    '''
+
+    # Loop through word pairs
     expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
-    scores = defaultdict(list)
-    rows = []
+    if permute :
+      expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
+
+    out = []
     for name, group in expdata.groupby('wordpair') :
-      closest_to_midpoint = self.midpoint_scores(group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
-      for search_budget in self.powers_of_two(1000) :        
-        clue_list = group['correctedClue'].to_numpy()
-        for clue in clue_list:
-          if clue in closest_to_midpoint[:search_budget]:
-            # divide by total length such that if there are more items in the list, the score is lower
-            prop = (closest_to_midpoint[:search_budget].index(clue) + 1) / len(closest_to_midpoint[:search_budget])
-            scores['mid_' + str(search_budget)].append(prop)
-          else:
-            scores['mid_' + str(search_budget)].append(0)
-      rows.append(group)
-    
-    pd.concat(
-      [
-        pd.concat(rows,axis=0,ignore_index=True),
-        pd.DataFrame.from_dict(scores)
-      ],
-      axis=1
-    ).to_csv('/'.join(data_path.split('/')[:-1])+'/midpoint_scores.csv')
+      print(name)
+      # convert words to nodes
+      target_nodes = self.get_nodes_by_word([group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0]])
+      clue_nodes = self.get_nodes_by_word(group['correctedClue'].to_numpy())
 
-  def save_frequency_scores(self,data_path):
-    expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
-    scores = defaultdict(list)
-    rows = []
-    freq = list(pd.read_csv("../data/vocab.csv").sort_values(by="LgSUBTLWF", ascending=False)["Word"])
-    # sort by frequency 
-    for name, group in expdata.groupby('wordpair') :
-      for search_budget in self.powers_of_two(1000) :
-        clue_list = group['correctedClue'].to_numpy()
-        for clue in clue_list:
-          if clue in freq[:search_budget]:
-            prop = (freq[:search_budget].index(clue)+ 1) / len(freq[:search_budget])
-            scores['freq_' + str(search_budget)].append(prop)
-          else:
-            scores['freq_' + str(search_budget)].append(0)
-      rows.append(group)
-    
-    pd.concat(
-      [
-        pd.concat(rows,axis=0,ignore_index=True),
-        pd.DataFrame.from_dict(scores)
-      ],
-      axis=1
-    ).to_csv('/'.join(data_path.split('/')[:-1])+'/freq_scores.csv')
-  
-  def get_example_walk(self, w1, w2):
-    target_indices = self.get_nodes_by_word([w1, w2])
-    walks = np.array([x for x in self.rw if x[0] in target_indices]).tolist()
-    random_index =  randrange(0, 999)
-    w1_walk = self.get_words_by_node(walks[random_index])
-    w2_walk = self.get_words_by_node(walks[random_index+1])
+      # loop through 10000 pairs of walks to get indices of first appearances
+      w1_walks = np.array([x for x in self.rw if x[0] == target_nodes[0]]).tolist()
+      w2_walks = np.array([x for x in self.rw if x[0] == target_nodes[1]]).tolist()
+      w1_walks_ord = [list(np.unique(walk)[np.argsort(np.unique(walk, return_index=True)[1])]) for walk in w1_walks]
+      w2_walks_ord = [list(np.unique(walk)[np.argsort(np.unique(walk, return_index=True)[1])]) for walk in w2_walks]
+      new_cols = defaultdict(list)
+      for w1_walk, w2_walk in zip(w1_walks_ord, w2_walks_ord) :
+        new_cols[f'w1_index_walk{len(new_cols.keys())}'] = [w1_walk.index(clue_node) if clue_node in w1_walk else 10000 for clue_node in clue_nodes]
+        new_cols[f'w2_index_walk{(len(new_cols.keys()) - 1)}'] = [w2_walk.index(clue_node) if clue_node in w2_walk else 10000 for clue_node in clue_nodes]
+      out.append(pd.concat(
+        [group.reset_index(), pd.DataFrame.from_dict(new_cols)],
+        axis = 1
+      ))
 
-    intersection_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
-    union_counts = {budget : defaultdict(lambda: 0.000001) for budget in self.powers_of_two(1000)}
+    pd.concat(out).to_csv(
+      f'../data/exp1/indices{"_permuted" if permute else ""}.csv'
+    )
 
-    for search_budget in self.powers_of_two(1000) :
-        intersection = list(set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget]))
-        intersection_counts[search_budget] = intersection
-        union = list(set(w1_walk[: search_budget]).union(w2_walk[: search_budget]))
-        union_counts[search_budget] = union
-
-    with open('../data/walk_data/example_intersection.json', 'w') as f:
-      json.dump(intersection_counts, f)
-
-    with open('../data/walk_data/example_union.json', 'w') as f:
-      json.dump(union_counts, f)
-
-    with open('../data/walk_data/example_walk.json', 'w') as f:
-      json.dump({w1_walk[0]:w1_walk, w2_walk[0]: w2_walk}, f)
-  
-  def visualize(self, w1, w2):
-    self.get_example_walk(w1,w2)
-    with open('../data/walk_data/example_walk.json') as json_file:
-      walks = json.load(json_file)
-    with open('../data/walk_data/example_union.json') as json_file:
-      union = json.load(json_file)
-    with open('../data/walk_data/example_intersection.json') as json_file:
-      intersection = json.load(json_file)
-    
-    labels = nx.get_node_attributes(self.graph, 'word')
-  
-    sub = list(set(walks[w1] + walks[w2]))
-    sub_indices = self.get_nodes_by_word(sub)
-
-    X = self.graph.subgraph(sub_indices)
-    
-    X = nx.relabel_nodes(X, labels)
-    
-    
-
-    it1 = walks[w1][:17]
-    w1_walk_edges = list(zip(it1, it1[1:]))
-    Y = X.subgraph(it1)
-    Y_edges = list(Y.edges())
-    Z1 = nx.Graph(Y)
-    Z1.remove_edges_from(Y_edges)
-    Z1.add_edges_from(w1_walk_edges)
-
-    it2 = walks[w2][:17]
-    w2_walk_edges = list(zip(it2, it2[1:]))
-    Y = X.subgraph(it2)
-    Y_edges = list(Y.edges())
-    Z2 = nx.Graph(Y)
-    Z2.remove_edges_from(Y_edges)
-    Z2.add_edges_from(w2_walk_edges)
-
-    intX = intersection['256']
-    int_graph =X.subgraph(intX)
-    int_graph2 = nx.Graph(int_graph)
-    int_graph2.remove_edges_from(list(Z1.edges()))
-    int_graph2.remove_edges_from(list(Z2.edges()))
-
-    unionX =union['256']
-    union_graph =X.subgraph(unionX)
-    union_graph2 = nx.Graph(union_graph)
-    union_graph2.remove_edges_from(list(Z1.edges()))
-    int_graph2.remove_edges_from(list(Z2.edges()))
-
-    pos = nx.spring_layout(X, k=5/math.sqrt(X.order()))
-    # draw main graph
-    import matplotlib.pyplot as plt
-
-    fig = plt.figure(figsize=(12,12))
-    ax = plt.subplot(111)
-
-    nx.draw_networkx(X.subgraph(walks[w1]), pos=pos, font_size=1, node_color='#DDE6FF', font_color='0.9', node_size=0.1,edge_color = '#DDE6FF')
-    nx.draw_networkx(X.subgraph(walks[w2]), pos=pos, font_size=1, node_color='#EEFBE8', font_color='0.9', node_size=0.1,edge_color = '#EEFBE8')
-
-    nx.draw_networkx(union_graph2, pos=pos, font_size=12, node_color='#FADD9E', font_color='black', node_size = 5, edge_color = '#FADD9E')
-    nx.draw_networkx(int_graph2, pos=pos, font_size=12, node_color='#FADD9E', font_color='black', node_size = 5, edge_color = '#FADD9E')
-    
-
-    nx.draw_networkx(Z1, pos=pos, font_size=12, node_color='red', font_color='red', edge_color = "red" , node_size = 5)
-    nx.draw_networkx(Z2, pos=pos, font_size=12, node_color='blue', font_color='blue', edge_color = "blue" , node_size = 5)
-
-    plt.tight_layout()
-    plt.savefig("visualize_graph.png", format="PNG")
-    #plt.show()
-
-
-    
 if __name__ == "__main__":
-  # current dir is models
-  # swow = SWOW('../data') 
-
-  # Chang pathed for debugging
-  # os.chdir("./models")
-  # print("Main method path: ", os.path.abspath('.'))
-
-  swow = SWOW('../data') 
-  np.random.seed(44)
-
-  ### EXP 1 CODE ###
-  # newdata, corrections = swow.check_words('../data/exp1/e1_data_long.csv', "Clue1")
-  # newdata.to_csv("../data/exp1/exp1_corrected.csv")
-  # print("corrections: ", corrections)
-  # swow.save_scores('../data/exp1/exp1_corrected.csv') 
-  # swow.save_midpoint_scores('../data/exp1/exp1_corrected.csv')
-  # swow.save_frequency_scores('../data/exp1/exp1_corrected.csv')
-  swow.save_candidates()
-
-  # TODO:
-  # make midpoint + freq baselines comparable
-
-  ### EXP 2 CODE ###
-  # swow.save_scores('../data/exp2/e2_corrected.csv')
-  
-  #swow.save_candidates()
-  #swow.midpoint_scores('happy','sad')
-  
-  #swow.save_frequency_scores('../data/exp1/e1_data_long.csv')
-  #swow.get_example_walk("happy", "sad")
-  #swow.visualize('cave', 'knight')
+  swow = SWOW('../data')
+  np.random.seed(444)
+#  swow.save_candidates()
+  swow.save_rank_order('../data/exp1/e1_data_long.csv', permute = False)
+  swow.save_rank_order('../data/exp1/e1_data_long.csv', permute = True)

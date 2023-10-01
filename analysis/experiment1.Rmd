@@ -13,75 +13,165 @@ library(tidyverse)
 library(ggthemes)
 library(tidyboot)
 library(here)
-targets = read_csv(here("data/targets.csv")) %>% select(wordpair, Level)
+library(jsonlite)
 ```
 
+# 1. Qualitative results
+
+## Examine example walks
+
 ```{r}
-softmax_t = function (x, tau){
-  e_x = exp(x*tau)
-  axis_sum = sum(e_x)
-  return (e_x / axis_sum)
-}
+walks <- fromJSON('../data/lion-tiger-walks.json') %>% as_tibble()
+```
+
+# 2. Behavioral results
+
+## Exclusions
+
+```{r}
+read_csv(here("data/exp1/e1_data_long.csv")) %>%
+  group_by(clueGiverID, wordpair) %>%
+  tally() %>%
+  group_by(clueGiverID) %>%
+  tally()
+```
+
+## How many clues listed?
+
+```{r}
+read_csv(here("data/exp1/e1_data_long.csv")) %>%
+  group_by(clueGiverID, Level, wordpair) %>%
+  tally() %>%
+  ggplot(aes(x = n - 1)) +
+    geom_bar() +
+    theme_few() +
+    labs(x = 'clues generated') +
+    facet_grid(~ Level) +
+    theme(aspect.ratio = 1)
+```
+
+## Individual differences? 
+
+```{r}
+read_csv(here("data/exp1/e1_data_long.csv")) %>%
+  group_by(clueGiverID, Level, wordpair) %>%
+  tally() %>%
+  ggplot(aes(x = n - 1)) +
+    geom_bar() +
+    theme_few() +
+    labs(x = 'clues generated') +
+    facet_wrap(~ clueGiverID) +
+    theme(aspect.ratio = 1/4)
 ```
 
 # examine walk scores
 
 ```{r}
-exp1_scores_plot = read_csv(here("data/exp1/exp1_scores.csv")) %>%
-  gather(budget, value, union_2:intersection_512) %>%
-  filter(variable %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueOption4')) %>%
+read_csv(here("data/exp1/scores.csv")) %>%
+  gather(budget, value, union_2:intersection_8192) %>%
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, Level, variable) %>%
+  group_by(budget, Level) %>%
   tidyboot_mean(value,nboot=100) %>%
   separate(budget, into = c('strategy', 'budget')) %>%
-  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = variable, fill = variable)) +
+  ggplot(aes(x = as.numeric(budget), y = log10(empirical_stat))) +
     geom_line(size=1, position = 'dodge') +
+    geom_vline(xintercept = 64) +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
     facet_grid(strategy ~ Level, scales = 'free') +
     theme_few() +
-    scale_color_few() +
-    labs(x = 'budget', y = 'visit score')
+    scale_x_log10() +
+    labs(x = 'budget', y = 'P(clue)')
 
 ggsave("../analysis/plots/exp1_plot1.pdf", exp1_scores_plot)
 ```
 
-# control 1: examine midpoint scores
+# Examine how far you have to go to find clue
 
 ```{r}
- read_csv(here("data/exp1/midpoint_scores.csv"))%>% select(-c(1,2)) %>% distinct() %>%
-  gather(budget, value,`mid_2`:`mid_512`) %>%
-  filter(variable %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueOption4')) %>%
+indices = read_csv(here("data/exp1/indices.csv")) %>% 
+  pivot_longer(names_to = 'key', values_to = 'value', 
+               cols = c(starts_with('w1'), starts_with('w2'))) %>%
+  separate(key, into = c('walk', 'i'), sep = '_index_walk') %>% 
+  pivot_wider(names_from = "walk", values_from = "value") %>%
+  mutate(union = reduce(across(w1:w2), pmin),
+         intersection = reduce(across(w1:w2), pmax)) 
+
+indices_permuted = read_csv(here("data/exp1/indices_permuted.csv")) %>% 
+  pivot_longer(names_to = 'key', values_to = 'value', 
+               cols = c(starts_with('w1'), starts_with('w2'))) %>%
+  separate(key, into = c('walk', 'i'), sep = '_index_walk') %>% 
+  pivot_wider(names_from = "walk", values_from = "value") %>%
+  mutate(union = reduce(across(w1:w2), pmin),
+         intersection = reduce(across(w1:w2), pmax)) 
+
+num_clues <- indices %>%
+  group_by(wordpair, clueGiverID, correctedClue) %>%
+  tally() %>%
+  group_by(wordpair, clueGiverID) %>%
+  tally() %>%
+  filter(n == 3)
+  
+bind_rows(
+  indices %>% mutate(src = 'empirical'), 
+  indices_permuted %>% mutate(src = 'permuted') 
+) %>%
+  #filter(intersection < 10000) %>%
+  group_by(src, wordpair, Level, variable,clueGiverID, clueFinal, correctedClue) %>%
+  summarize(intersection = mean(intersection), union = mean(union), w1 = mean(w1), w2 = mean(w2)) %>% arrange(wordpair, clueGiverID)
+  # bind_rows(
+  #   read_csv(here("data/exp1/indices_permuted.csv")) %>% 
+  #     rename(union_index_permuted = union_index,
+  #            intersection_index_permuted = intersection_index),
+  #   read_csv(here("data/exp1/freq_scores.csv")), 
+  #   read_csv(here("data/exp1/midpoint_scores.csv"))
+  pivot_longer(names_to = 'measure', values_to = 'value', 
+             cols = c(union, intersection, w1, w2)) %>% #  union_index_permuted, intersection_index_permuted, freq_index, mid_index
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, Level, variable) %>%
-  tidyboot_mean(value,nboot=100) %>%
+  group_by(wordpair, measure, clueGiverID) %>%
+  mutate(l = length(value))
+  group_by(measure, src, variable, Level) %>%
+  tidyboot_mean(value, nboot=100) %>%
+  ggplot(aes(x = variable, y = empirical_stat, color = Level, linetype = src, group = interaction(Level, src))) +
+    geom_point() +
+    geom_line() +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
+    facet_grid(measure ~ Level, scales = 'free') +
+    scale_color_colorblind() +
+    scale_x_discrete(guide = guide_axis(angle = 90)) +
+    theme_few() +
+    labs(x = '', y = 'first occurrence') 
+
+ggsave("../analysis/plots/exp1_plot1.pdf", width = 10, height = 7, units = 'in')
+```
+
+```{r}
+read_csv(here("data/exp1/indices.csv")) %>%
+  ggplot(aes(x = intersection_index)) +
+    geom_histogram() +
+    theme_few()
+```
+# 
+
+```{r}
+read_csv(here("data/exp1/scores.csv")) %>%
+  gather(budget, value, union_2:intersection_8192) %>%
+  filter(clueFinal == Clue1) %>%
+  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
+  group_by(budget, Level) %>%
+  tidyboot_mean(value>0.0001,nboot=100) %>%
   separate(budget, into = c('strategy', 'budget')) %>%
-  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = variable, fill = variable)) +
+  ggplot(aes(x = as.numeric(budget), y = empirical_stat)) +
     geom_line(size=1, position = 'dodge') +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
     facet_grid(strategy ~ Level, scales = 'free') +
+    ylim(0,1) +
     theme_few() +
-    scale_color_few() +
-    labs(x = 'budget', y = 'visit score')
+    scale_x_log10() +
+    labs(x = 'budget', y = '% visited at least once')
 ```
 
-# control 2: examine frequency scores
 
-```{r}
- read_csv(here("data/exp1/freq_scores.csv"))%>% select(-c(1,2)) %>% distinct() %>%
-  gather(budget, value,`freq_2`:`freq_512`) %>%
-  filter(variable %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueOption4')) %>%
-  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, Level, variable) %>%
-  tidyboot_mean(value,nboot=100) %>%
-  separate(budget, into = c('strategy', 'budget')) %>%
-  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = variable, fill = variable)) +
-    geom_line(size=1, position = 'dodge') +
-    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    facet_grid(strategy ~ Level, scales = 'free') +
-    theme_few() +
-    scale_color_few() +
-    labs(x = 'budget', y = 'visit score')
-```
+
 ### MAY NOT NEED THESE EXTRA ANALYSES ###
 # Examine lists of candidates
 
@@ -111,7 +201,7 @@ ggplot(aes(x = budget, y = mean, color = model, group = model)) +
                 color = "gray", position = position_dodge(0))+
   geom_line()+
   geom_point(size = 2)+
-  facet_wrap(~Level)+
+  facet_wrap(~ Level)+
     labs(y = 'common candidates (proportion)', 
          title = "proportion of common candidates with behavioral data") +
   scale_color_calc()+
