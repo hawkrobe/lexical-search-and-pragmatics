@@ -39,9 +39,11 @@ The data file contains the following columns:
 `TEOption8`: The time at which the eighth candidate clue was submitted (last keypress), in milliseconds<br>
 
 **Note**: The final clue was generated on a separate screen, so the times are relative to the start of the final clue generation screen. The times are in milliseconds.
+
 `clueFinal`: The final clue selected by the speaker<br>
 `TBFinal`: The time at which the final clue started being generated (first keypress), in milliseconds<br>
 `TEFinal`: The time at which the final clue was submitted (last keypress), in milliseconds<br>
+
 **Note**: The guesser was presented with the final clue on a separate screen and asked to click on 3-8 guess candidates on this screen, so the times are relative to the start of the final clue presentation screen. The times are in milliseconds.
 
 **Note** Some of the responses/RTs for GuessOptions 3-8 were copied over from previous rows due to a bug in the data recording in the software/interface. 
