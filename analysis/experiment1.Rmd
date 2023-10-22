@@ -170,6 +170,39 @@ read_csv(here("data/exp1/scores.csv")) %>%
     labs(x = 'budget', y = '% visited at least once')
 ```
 
+# non-walk model
+
+```{r}
+forage_scores = read_csv(here("data/exp1/forage_clue_scores.csv")) %>%
+  mutate(LL = log(score)) 
+
+exp1Data = read_csv(here("data/exp1/exp1-cleaned.csv")) %>%
+  left_join(forage_scores)
+
+high_scoring_clues = exp1Data %>%
+  group_by(wordpair,seqOrder ) %>%
+  slice_max(LL) %>%
+  select(-seqOrder) %>%
+  select(wordpair, correctedClue) %>%
+  distinct()
+
+sumLL = exp1Data %>%
+  group_by(Level, seqOrder, alpha) %>% 
+  summarize(sumLL = sum(LL)) %>%
+  filter(seqOrder %in% c("clueOption1", "clueOption2", "clueOption3", "clueFinal") ) %>%
+  arrange(Level,seqOrder, desc(sumLL))
+
+sumLL %>%
+  ggplot(aes(x = alpha, y = sumLL, color = seqOrder)) +
+  geom_line(size=1)+
+  facet_wrap(~Level)+
+  theme_few()
+
+
+
+```
+
+
 
 
 ### MAY NOT NEED THESE EXTRA ANALYSES ###
