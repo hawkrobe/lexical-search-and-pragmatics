@@ -1,5 +1,5 @@
 ---
-title: "E1: online candidate generation"
+title: "Exp. 1: online candidate generation"
 output: html_notebook
 editor_options: 
   chunk_output_type: inline
@@ -21,7 +21,7 @@ library(jsonlite)
 ## Examine example walks
 
 ```{r}
-walks <- fromJSON('../data/lion-tiger-walks.json') %>% as_tibble()
+walks <- read_json(here('data/walk_data/example_walk.json')) %>% as_tibble()
 ```
 
 # 2. Behavioral results
@@ -29,17 +29,22 @@ walks <- fromJSON('../data/lion-tiger-walks.json') %>% as_tibble()
 ## Exclusions
 
 ```{r}
-read_csv(here("data/exp1/e1_data_long.csv")) %>%
+inclusions <- read_csv(here("data/exp1/exp1-raw.csv")) %>%
   group_by(clueGiverID, wordpair) %>%
   tally() %>%
   group_by(clueGiverID) %>%
-  tally()
+  tally() %>% 
+  filter(n > 20) %>%
+  pull(clueGiverID)
+
+d <- read_csv(here("data/exp1/exp1-cleaned.csv")) %>%
+  filter(clueGiverID %in% inclusions)
 ```
 
 ## How many clues listed?
 
 ```{r}
-read_csv(here("data/exp1/e1_data_long.csv")) %>%
+d %>%
   group_by(clueGiverID, Level, wordpair) %>%
   tally() %>%
   ggplot(aes(x = n - 1)) +
@@ -52,15 +57,36 @@ read_csv(here("data/exp1/e1_data_long.csv")) %>%
 
 ## Individual differences? 
 
+Most games stuck to exactly 3 clues but some were way out there.
+
 ```{r}
-read_csv(here("data/exp1/e1_data_long.csv")) %>%
+d %>%
   group_by(clueGiverID, Level, wordpair) %>%
   tally() %>%
+  group_by(clueGiverID) %>%
+  mutate(avg_num_clues = mean(n)) %>%
+  mutate(clueGiverID = as.character(clueGiverID)) %>%
   ggplot(aes(x = n - 1)) +
     geom_bar() +
     theme_few() +
     labs(x = 'clues generated') +
-    facet_wrap(~ clueGiverID) +
+    facet_wrap(~ fct_reorder(clueGiverID, avg_num_clues)) +
+    theme(aspect.ratio = 1/4)
+```
+
+```{r}
+d %>%
+  
+  group_by(clueGiverID, Level, wordpair) %>%
+  tally() %>%
+  group_by(clueGiverID) %>%
+  mutate(avg_num_clues = mean(n)) %>%
+  mutate(clueGiverID = as.character(clueGiverID)) %>%
+  ggplot(aes(x = n - 1)) +
+    geom_bar() +
+    theme_few() +
+    labs(x = 'clues generated') +
+    facet_wrap(~ fct_reorder(clueGiverID, avg_num_clues)) +
     theme(aspect.ratio = 1/4)
 ```
 

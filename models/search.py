@@ -152,8 +152,8 @@ class SWOW:
         intersect = set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget])
         union = set(w1_walk[: search_budget]).union(w2_walk[: search_budget])
         for node in range(len(self.vocab)) :
-          intersect_avg[search_budget][node] += [(1/len(intersect) + 0.001) if node in intersect else 0.0000001]
-          union_avg[search_budget][node] += [(1/len(union) + 0.001) if node in union else 0.0000001]
+          intersect_avg[search_budget][node] += [(1/len(intersect) + 0.000001) if node in intersect else 0.0000001]
+          union_avg[search_budget][node] += [(1/len(union) + 0.000001) if node in union else 0.0000001]
 
     return ({k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in union_avg.items()},
             {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in intersect_avg.items()})
@@ -236,12 +236,12 @@ class SWOW:
       ))
 
     pd.concat(out).to_csv(
-      f'../data/exp1/indices{"_permuted" if permute else ""}.csv'
+      f'../data/exp1/model_output/indices{"_permuted" if permute else ""}.csv'
     )
 
 if __name__ == "__main__":
   swow = SWOW('../data')
   np.random.seed(444)
 #  swow.save_candidates()
-  swow.save_rank_order('../data/exp1/e1_data_long.csv', permute = False)
-  swow.save_rank_order('../data/exp1/e1_data_long.csv', permute = True)
+  swow.save_rank_order('../data/exp1/exp1-cleaned.csv', permute = False)
+  swow.save_rank_order('../data/exp1/exp1-cleaned.csv', permute = True)
