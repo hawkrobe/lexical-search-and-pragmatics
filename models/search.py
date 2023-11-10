@@ -1,5 +1,4 @@
 import random
-from random import randrange
 import os
 import json
 import pickle
@@ -7,19 +6,11 @@ import itertools
 import walker
 import math
 import warnings
-import scipy.spatial.distance as distance
-import scipy
-from heapq import nlargest
+
 import pandas as pd
 import numpy as np
 import networkx as nx
-import math
-from collections import defaultdict
-import difflib
-import gensim.downloader as api
-import time
-
-
+from collections import defaultdict, Counter
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -39,10 +30,10 @@ class SWOW:
     print("Init path:", os.path.abspath('.'))
 
     # import target words
-    self.target_df = pd.read_csv(f"{data_path}/targets.csv".format())
+    self.target_df = pd.read_csv(f"{data_path}/targets.csv")
     self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
     self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
-    self.vocab = list(pd.read_csv("../data/vocab.csv").Word)
+    self.vocab = list(pd.read_csv(f"{data_path}/walk_data/vocab.csv").Word)
     self.load_graph(data_path)
     self.index_to_name = {k: v['word'] for k,v in self.graph.nodes(data=True)}
     self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
@@ -140,58 +131,70 @@ class SWOW:
     target_indices = self.get_nodes_by_word([w1, w2])
     w1_walks = np.array([x for x in self.rw if x[0] == target_indices[0]]).tolist()
     w2_walks = np.array([x for x in self.rw if x[0] == target_indices[1]]).tolist()
-
+    freq_raw = pd.read_csv("../data/walk_data/vocab.csv")
+    freq = dict(zip(freq_raw["Word"], 10**freqs["LgSUBTLWF"]))
     union_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
     intersect_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
+    w1_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
+    w2_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
+    freq_avg = {budget: defaultdict(list) for budget in self.powers_of_two(10000)}
 
     # Count union/intersection appearances
     for w1_walk, w2_walk in zip(w1_walks, w2_walks) :
-      union_counts = {budget: defaultdict(int) for budget in self.powers_of_two(10000)}
-      intersect_counts =  {budget: defaultdict(int) for budget in self.powers_of_two(10000)}
       for search_budget in self.powers_of_two(10000) :
-        intersect = set(w1_walk[: search_budget]).intersection(w2_walk[: search_budget])
-        union = set(w1_walk[: search_budget]).union(w2_walk[: search_budget])
+        w1_counts = Counter(w1_walk[: search_budget])
+        w2_counts = Counter(w2_walk[: search_budget])
+        intersect = w1_counts & w2_counts
+        union = w1_counts | w2_counts
         for node in range(len(self.vocab)) :
-          intersect_avg[search_budget][node] += [(1/len(intersect) + 0.000001) if node in intersect else 0.0000001]
-          union_avg[search_budget][node] += [(1/len(union) + 0.000001) if node in union else 0.0000001]
+          intersect_avg[search_budget][node] += [(intersect[node]/(intersect.total() + 1) + 0.000001) if node in intersect else 0.0000001]
+          union_avg[search_budget][node] += [(union[node]/(union.total() + 1) + 0.000001) if node in union else 0.0000001]
+          w1_avg[search_budget][node] += [(w1_counts[node]/(w1_counts.total() + 1) + 0.000001) if node in w1_counts else 0.0000001]
+          w2_avg[search_budget][node] += [(w2_counts[node]/(w2_counts.total() + 1) + 0.000001) if node in w2_counts else 0.0000001]
+          freq_avg[search_budget][node] += [freq[node] if node in freq.keys() else 0.000001]
 
     return ({k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in union_avg.items()},
-            {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in intersect_avg.items()})
+            {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in intersect_avg.items()},
+            {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in w1_avg.items()},
+            {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in w2_avg.items()},
+            {k: {element : np.mean(l) for (element, l) in d.items()} for (k, d) in freq_avg.items()})
 
-
-  def clue_score(self, clues, w1, w2): 
-    '''
-    Extract info for given clue and word-pair.
-
-    Args: 
-      w1, w2: word pair
-      clues: array of clues generated from word pair  
-    Returns: 
-      (union score, intersection score) of word
-    '''
-    clue_indices = self.get_nodes_by_word(clues)
-    union_counts, intersection_counts = self.union_intersection_candidates(w1, w2)
-    return ({budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in union_counts.items()},
-            {budget: [d[clue_index] for clue_index in clue_indices] for (budget, d) in intersection_counts.items()})
-
-  def save_scores(self, data_path):
+  def save_scores(self, data_path, permute = False):
     '''
     Computes and saves clue scores to scores.csv
     '''
-    # import empirical clues (cleaned)
+
     expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
+    if permute :
+      expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
+
     scores = defaultdict(list)
     rows = []
-    # look up how often each clue was visited
+
     for name, group in expdata.groupby('wordpair') :
-      union_score, intersect_score = self.clue_score(
-        group['correctedClue'].to_numpy(),
+      print(name)
+      # look up how often each clue was visited
+      clue_indices = self.get_nodes_by_word(group['correctedClue'].to_numpy())
+      union_counts, intersection_counts, w1_counts, w2_counts, freq = self.union_intersection_candidates(
         group['Word1'].to_numpy()[0],
         group['Word2'].to_numpy()[0]
       )
-      for key in union_score.keys() :
-        scores['union_' + str(key)].extend(union_score[key])
-        scores['intersection_' + str(key)].extend(intersect_score[key])
+      for key in union_counts.keys() :
+        scores['union_' + str(key)].extend(
+          [union_counts[key][clue_index] if clue_index != None else None for clue_index in clue_indices]
+        )
+        scores['intersection_' + str(key)].extend(
+          [intersection_counts[key][clue_index] if clue_index != None else None for clue_index in clue_indices]
+        )
+        scores['w1_' + str(key)].extend(
+          [intersection_counts[key][clue_index] if clue_index != None else None for clue_index in clue_indices]
+        )
+        scores['w2_' + str(key)].extend(
+          [intersection_counts[key][clue_index] if clue_index != None else None for clue_index in clue_indices]
+        )
+        scores['freq_' + str(key)].extend(
+          [intersection_counts[key][clue_index] if clue_index != None else None for clue_index in clue_indices]
+        )
       rows.append(group)
 
     # save to file
@@ -201,7 +204,9 @@ class SWOW:
         pd.DataFrame.from_dict(scores)
       ],
       axis=1
-    ).to_csv('/'.join(data_path.split('/')[:-1])+'/scores.csv')
+    ).to_csv(
+      f'../data/exp1/model_output/scores{"_permuted" if permute else ""}.csv'
+    )
 
   def save_rank_order(self, data_path, permute = False):
     '''
@@ -243,5 +248,5 @@ if __name__ == "__main__":
   swow = SWOW('../data')
   np.random.seed(444)
 #  swow.save_candidates()
-  swow.save_rank_order('../data/exp1/exp1-cleaned.csv', permute = False)
-  swow.save_rank_order('../data/exp1/exp1-cleaned.csv', permute = True)
+  swow.save_scores('../data/exp1/exp1-cleaned.csv', permute = False)
+  swow.save_scores('../data/exp1/exp1-cleaned.csv', permute = True)
