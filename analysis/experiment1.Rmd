@@ -21,15 +21,81 @@ library(jsonlite)
 ## Examine example walks
 
 ```{r}
-walks <- read_json(here('data/walk_data/example_walk.json')) %>% as_tibble()
+clues <- read_csv(here('data/exp1/exp1-cleaned.csv')) 
+clues%>%group_by(wordpair, Word1, Word2) %>% tally() %>% select(-n) %>% write_csv(here('data/exp1/targets.csv'))
+walks <- fromJSON(here('data/walk_data/happy-sad-walks.json')) %>% 
+  as_tibble() %>%
+  mutate(step = row_number()) %>%
+  gather(walk, correctedClue, -step) %>%
+  separate(walk, into = c('_', 'walk'), sep = '-') %>%
+  mutate(start = ifelse(as.integer(walk) %% 2 == 0, 'w1', 'w2')) %>% 
+  select(-`_`) 
+
+library(ggridges)
+
+clues %>% left_join(walks, by = c('correctedClue')) %>%
+  filter(wordpair == 'happy-sad') %>%
+  group_by(walk, correctedClue, clueGiverID) %>%
+  filter(step == first(step)) %>%
+  group_by(correctedClue, clueGiverID, seqOrder, start) %>%
+  summarize(m = mean(step)) %>%
+  ungroup() %>%
+  ggplot(aes(x = m, y = start, group = start, color = seqOrder)) +
+    #geom_density_ridges(rel_min_height = 0.01) +
+    #geom_point(aes(x = mean(m)), size = 5) +
+    geom_jitter(alpha = 0.1) +
+    theme_few() +
+    xlim(-50, 2000) +
+    scale_x_log10()    
+```
+
+## Vocab
+
+```{r}
+read_csv(here('data/walk_data/vocab.csv')) %>%
+  pull(Word) %>%
+  length()
 ```
 
 # 2. Behavioral results
 
+## Recode Levels
+
+```{r}
+d.raw.oldlevels <- read_csv(here("data/exp1/exp1-raw.csv")) %>%
+  mutate(correct = str_detect(wordpair, fixed(tolower(GUESS_1_FINAL))) 
+                   & str_detect(wordpair, fixed(tolower(GUESS_2_FINAL))))
+
+d.newlevels <- d.raw.oldlevels %>% 
+  rowwise() %>%
+  mutate(word1 = min(target1, target2),
+         word2 = max(target1, target2)) %>%
+  unite(wordpair, word1, word2, sep = '-') %>%
+  group_by(wordpair) %>%
+  summarize(correct = mean(correct)) %>%
+  arrange(correct) %>%
+  mutate(level = case_when(correct < .2 ~ 'Hard',
+                           correct > .67 ~ 'Easy',
+                           TRUE ~ 'Medium'))
+
+# preserve ordering of target pair in d.raw
+d.levels <- bind_rows(
+  d.newlevels %>% group_by(wordpair, level) %>% tally(),
+  d.newlevels %>% 
+    separate(wordpair, into = c('word1', 'word2'), sep = '-') %>%
+    unite(wordpair, word2, word1, sep = '-') %>% 
+    group_by(wordpair, level) %>% tally()
+) %>% select(-n)
+
+d.raw <- d.raw.oldlevels %>%
+  left_join(d.levels) %>%
+  mutate(level = fct_relevel(level, 'Easy', 'Medium'))
+```
+
 ## Exclusions
 
 ```{r}
-inclusions <- read_csv(here("data/exp1/exp1-raw.csv")) %>%
+inclusions <- d.raw %>%
   group_by(clueGiverID, wordpair) %>%
   tally() %>%
   group_by(clueGiverID) %>%
@@ -38,20 +104,22 @@ inclusions <- read_csv(here("data/exp1/exp1-raw.csv")) %>%
   pull(clueGiverID)
 
 d <- read_csv(here("data/exp1/exp1-cleaned.csv")) %>%
-  filter(clueGiverID %in% inclusions)
+  filter(clueGiverID %in% inclusions) %>%
+  select(-Level) %>%
+  left_join(d.newlevels %>% select(wordpair, level))
 ```
 
 ## How many clues listed?
 
 ```{r}
 d %>%
-  group_by(clueGiverID, Level, wordpair) %>%
+  group_by(clueGiverID, level, wordpair) %>%
   tally() %>%
   ggplot(aes(x = n - 1)) +
     geom_bar() +
     theme_few() +
     labs(x = 'clues generated') +
-    facet_grid(~ Level) +
+    facet_grid(~ level) +
     theme(aspect.ratio = 1)
 ```
 
@@ -61,7 +129,7 @@ Most games stuck to exactly 3 clues but some were way out there.
 
 ```{r}
 d %>%
-  group_by(clueGiverID, Level, wordpair) %>%
+  group_by(clueGiverID, level, wordpair) %>%
   tally() %>%
   group_by(clueGiverID) %>%
   mutate(avg_num_clues = mean(n)) %>%
@@ -74,47 +142,85 @@ d %>%
     theme(aspect.ratio = 1/4)
 ```
 
-```{r}
-d %>%
-  
-  group_by(clueGiverID, Level, wordpair) %>%
-  tally() %>%
-  group_by(clueGiverID) %>%
-  mutate(avg_num_clues = mean(n)) %>%
-  mutate(clueGiverID = as.character(clueGiverID)) %>%
-  ggplot(aes(x = n - 1)) +
-    geom_bar() +
-    theme_few() +
-    labs(x = 'clues generated') +
-    facet_wrap(~ fct_reorder(clueGiverID, avg_num_clues)) +
-    theme(aspect.ratio = 1/4)
-```
-
-# examine walk scores
+## Manipulation check
 
 ```{r}
-read_csv(here("data/exp1/scores.csv")) %>%
-  gather(budget, value, union_2:intersection_8192) %>%
-  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, Level) %>%
-  tidyboot_mean(value,nboot=100) %>%
-  separate(budget, into = c('strategy', 'budget')) %>%
-  ggplot(aes(x = as.numeric(budget), y = log10(empirical_stat))) +
-    geom_line(size=1, position = 'dodge') +
-    geom_vline(xintercept = 64) +
-    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    facet_grid(strategy ~ Level, scales = 'free') +
-    theme_few() +
-    scale_x_log10() +
-    labs(x = 'budget', y = 'P(clue)')
-
-ggsave("../analysis/plots/exp1_plot1.pdf", exp1_scores_plot)
+ggplot(d.newlevels, aes(x = correct, fill = level)) +
+    geom_histogram(bins = 13) +
+    geom_vline(xintercept = c(.66, .20)) +
+    labs(x = '% correct', title = 'Difficulty distribution of clues') +
+    theme_few()
 ```
+
+```{r}
+d.raw %>% group_by(level) %>% tidyboot_mean(correct, nboot = 10) %>% 
+  ggplot(aes(x = level, y = empirical_stat)) +
+    geom_bar(stat = 'identity') +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
+    theme_few()
+```
+
+```{r}
+d.raw %>% group_by(level) %>% tidyboot_mean(GUESS_2_FINAL_TIME, nboot = 1000, na.rm = T) %>% 
+  ggplot(aes(x = level, y = empirical_stat)) +
+    geom_bar(stat = 'identity') +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
+    labs(y = 'total guesser time') +
+    theme_few()
+```
+
+```{r}
+d.raw %>% group_by(level) %>% tidyboot_mean(TBOption1, nboot = 1000, na.rm = T) %>% 
+  ggplot(aes(x = level, y = empirical_stat)) +
+    geom_bar(stat = 'identity') +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
+    labs(y = 'time to first keypress') +
+    theme_few()
+```
+
+## Order effects
+
+```{r}
+d.order <- d %>%
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+  spread(seqOrder, correctedClue) %>%
+  gather(seqOrder, correctedClue, starts_with('clueOption')) %>%
+  mutate(match = clueFinal == correctedClue)
+
+
+d.order %>%
+  group_by(seqOrder, level) %>%
+  summarize(m = mean(match, na.rm = T)) %>%
+  spread(seqOrder, m) %>%
+  mutate(other = 1 - clueOption1 - clueOption2 - clueOption3) %>%
+  gather(seqOrder, m, -level) %>%
+  mutate(level = fct_relevel(level, 'Easy', 'Medium')) %>%
+  ggplot(aes(x = level, y = m, fill = seqOrder)) +
+    geom_bar(stat = 'identity') +
+    theme_few() +
+    scale_fill_colorblind(name = "order") +
+    labs(y = 'proportion matching final clue', x = 'difficulty') +
+    theme(aspect.ratio = 1)
+```
+
+```{r}
+d.order %>%
+  filter(seqOrder == 'clueOption1') %>%
+  glmer(match ~ level + 
+               (1 | clueGiverID) ,
+        data = ., 
+        family = 'binomial') %>%
+  summary()
+```
+
+# 3. Model results
+
+## examine walk scores
 
 # Examine how far you have to go to find clue
 
 ```{r}
-indices = read_csv(here("data/exp1/indices.csv")) %>% 
+indices = read_csv(here("data/exp1/model_output/indices.csv")) %>% 
   pivot_longer(names_to = 'key', values_to = 'value', 
                cols = c(starts_with('w1'), starts_with('w2'))) %>%
   separate(key, into = c('walk', 'i'), sep = '_index_walk') %>% 
@@ -122,7 +228,7 @@ indices = read_csv(here("data/exp1/indices.csv")) %>%
   mutate(union = reduce(across(w1:w2), pmin),
          intersection = reduce(across(w1:w2), pmax)) 
 
-indices_permuted = read_csv(here("data/exp1/indices_permuted.csv")) %>% 
+indices_permuted = read_csv(here("data/exp1/model_output/indices_permuted.csv")) %>% 
   pivot_longer(names_to = 'key', values_to = 'value', 
                cols = c(starts_with('w1'), starts_with('w2'))) %>%
   separate(key, into = c('walk', 'i'), sep = '_index_walk') %>% 
@@ -130,34 +236,23 @@ indices_permuted = read_csv(here("data/exp1/indices_permuted.csv")) %>%
   mutate(union = reduce(across(w1:w2), pmin),
          intersection = reduce(across(w1:w2), pmax)) 
 
-num_clues <- indices %>%
-  group_by(wordpair, clueGiverID, correctedClue) %>%
-  tally() %>%
-  group_by(wordpair, clueGiverID) %>%
-  tally() %>%
-  filter(n == 3)
-  
 bind_rows(
-  indices %>% mutate(src = 'empirical'), 
-  indices_permuted %>% mutate(src = 'permuted') 
+  indices %>% mutate(src = 'empirical')
+  #indices_permuted %>% mutate(src = 'permuted') 
 ) %>%
-  #filter(intersection < 10000) %>%
-  group_by(src, wordpair, Level, variable,clueGiverID, clueFinal, correctedClue) %>%
-  summarize(intersection = mean(intersection), union = mean(union), w1 = mean(w1), w2 = mean(w2)) %>% arrange(wordpair, clueGiverID)
-  # bind_rows(
-  #   read_csv(here("data/exp1/indices_permuted.csv")) %>% 
-  #     rename(union_index_permuted = union_index,
-  #            intersection_index_permuted = intersection_index),
-  #   read_csv(here("data/exp1/freq_scores.csv")), 
-  #   read_csv(here("data/exp1/midpoint_scores.csv"))
+  filter(is.na(intersection) | is.na(union) | is.na(w1) | is.na(w2)) %>%
+  group_by(src, wordpair, Level, seqOrder,clueGiverID, correctedClue) %>%
+  summarize(intersection = mean(intersection), union = mean(union), w1 = mean(w1), w2 = mean(w2)) %>% #arrange(wordpair, clueGiverID) %>%
+  bind_rows(read_csv(here("data/exp1/model_output/freq_scores.csv"))) %>%
+  bind_rows(read_csv(here("data/exp1/model_output/midpoint_scores.csv"))) %>%
   pivot_longer(names_to = 'measure', values_to = 'value', 
              cols = c(union, intersection, w1, w2)) %>% #  union_index_permuted, intersection_index_permuted, freq_index, mid_index
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
   group_by(wordpair, measure, clueGiverID) %>%
-  mutate(l = length(value))
-  group_by(measure, src, variable, Level) %>%
-  tidyboot_mean(value, nboot=100) %>%
-  ggplot(aes(x = variable, y = empirical_stat, color = Level, linetype = src, group = interaction(Level, src))) +
+  mutate(l = length(value)) %>%
+  group_by(measure, src, seqOrder, Level) %>%
+  tidyboot_mean(value, nboot=100, na.rm = T) %>%
+  ggplot(aes(x = seqOrder, y = empirical_stat, color = Level, linetype = src, group = interaction(Level, src))) +
     geom_point() +
     geom_line() +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
@@ -179,21 +274,28 @@ read_csv(here("data/exp1/indices.csv")) %>%
 # 
 
 ```{r}
-read_csv(here("data/exp1/scores.csv")) %>%
+d.scores <- bind_rows(
+  read_csv(here("data/exp1/model_output/scores.csv")) %>% mutate(src = 'empirical'),
+  read_csv(here("data/exp1/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
+) %>%
   gather(budget, value, union_2:intersection_8192) %>%
-  filter(clueFinal == Clue1) %>%
-  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, Level) %>%
-  tidyboot_mean(value>0.0001,nboot=100) %>%
-  separate(budget, into = c('strategy', 'budget')) %>%
-  ggplot(aes(x = as.numeric(budget), y = empirical_stat)) +
+  select(-Level) %>%
+  left_join(d.levels) %>%
+  mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
+  group_by(budget, src, level) %>%
+  tidyboot_mean(value, nboot=100, na.rm = TRUE) %>%
+  separate(budget, into = c('strategy', 'budget'))
+  
+d.scores %>%
+  filter(src == 'empirical') %>%
+  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = strategy, group = strategy)) +
     geom_line(size=1, position = 'dodge') +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    facet_grid(strategy ~ Level, scales = 'free') +
-    ylim(0,1) +
+    facet_grid( ~ level, scales = 'free') +
     theme_few() +
+    scale_color_colorblind()+
     scale_x_log10() +
-    labs(x = 'budget', y = '% visited at least once')
+    labs(x = 'budget', y = 'P(visit)')
 ```
 
 
