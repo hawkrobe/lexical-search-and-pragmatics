@@ -21,9 +21,10 @@ library(jsonlite)
 ## Examine example walks
 
 ```{r}
-clues <- read_csv(here('data/exp1/exp1-cleaned.csv')) 
-clues%>%group_by(wordpair, Word1, Word2) %>% tally() %>% select(-n) %>% write_csv(here('data/exp1/targets.csv'))
-walks <- fromJSON(here('data/walk_data/happy-sad-walks.json')) %>% 
+clues <- read_csv(here('data/exp1/cleaned.csv')) 
+
+pair = 'army-drum'
+walks <- fromJSON(here(paste0('data/exp1/model_output/', pair, '-walks.json', collapse = ''))) %>% 
   as_tibble() %>%
   mutate(step = row_number()) %>%
   gather(walk, correctedClue, -step) %>%
@@ -34,7 +35,7 @@ walks <- fromJSON(here('data/walk_data/happy-sad-walks.json')) %>%
 library(ggridges)
 
 clues %>% left_join(walks, by = c('correctedClue')) %>%
-  filter(wordpair == 'happy-sad') %>%
+  filter(wordpair == pair) %>%
   group_by(walk, correctedClue, clueGiverID) %>%
   filter(step == first(step)) %>%
   group_by(correctedClue, clueGiverID, seqOrder, start) %>%
@@ -42,17 +43,50 @@ clues %>% left_join(walks, by = c('correctedClue')) %>%
   ungroup() %>%
   ggplot(aes(x = m, y = start, group = start, color = seqOrder)) +
     #geom_density_ridges(rel_min_height = 0.01) +
-    #geom_point(aes(x = mean(m)), size = 5) +
+    geom_point(aes(x = mean(m)), size = 5, data = . %>% filter(start == 'w1')) +
+    geom_point(aes(x = mean(m)), size = 5, data = . %>% filter(start == 'w2')) +
     geom_jitter(alpha = 0.1) +
     theme_few() +
     xlim(-50, 2000) +
     scale_x_log10()    
 ```
 
+## Look at cumulative probability?
+
+```{r}
+clues %>% 
+  filter(wordpair == pair) %>%
+  select(correctedClue) %>%
+  unique() %>%
+  left_join(walks, by = c('correctedClue')) %>%
+  group_by(walk, correctedClue) %>%
+  select(-start) %>%
+  filter(step == first(step)) %>%
+  group_by(step, correctedClue) %>%
+  tally() %>%
+  ungroup() %>%
+  complete(correctedClue, step = min(step):max(step), fill = list(n=0)) %>%
+  group_by(correctedClue) %>%
+  arrange(step, correctedClue) %>%
+  mutate(cdf = cumsum(n)/2000) %>%
+  ungroup() %>%
+  ggplot(aes(x = step, y = cdf)) +
+    geom_line(alpha = 0.1, aes(group = correctedClue)) +
+    geom_text(check_overlap = T, nudge_x = 500, aes(label = correctedClue), data = . %>% filter(step== 10000)) +
+    geom_line(data = . %>% group_by(step) %>% summarize(cdf = mean(cdf))) +
+    theme_few() +
+    xlim(0, 11000)
+
+ggsave(here('analysis/plots/exp1-army-drum-cdf.pdf'), units='in', height = 6, width = 6)
+
+```
+
 ## Vocab
 
 ```{r}
-read_csv(here('data/walk_data/vocab.csv')) %>%
+vocab <- read_csv(here('data/walk_data/vocab.csv')) 
+
+vocab %>%
   pull(Word) %>%
   length()
 ```
@@ -62,7 +96,7 @@ read_csv(here('data/walk_data/vocab.csv')) %>%
 ## Recode Levels
 
 ```{r}
-d.raw.oldlevels <- read_csv(here("data/exp1/exp1-raw.csv")) %>%
+d.raw.oldlevels <- read_csv(here("data/exp1/raw.csv")) %>%
   mutate(correct = str_detect(wordpair, fixed(tolower(GUESS_1_FINAL))) 
                    & str_detect(wordpair, fixed(tolower(GUESS_2_FINAL))))
 
@@ -74,7 +108,7 @@ d.newlevels <- d.raw.oldlevels %>%
   group_by(wordpair) %>%
   summarize(correct = mean(correct)) %>%
   arrange(correct) %>%
-  mutate(level = case_when(correct < .2 ~ 'Hard',
+  mutate(level = case_when(correct < .25 ~ 'Hard',
                            correct > .67 ~ 'Easy',
                            TRUE ~ 'Medium'))
 
@@ -103,7 +137,7 @@ inclusions <- d.raw %>%
   filter(n > 20) %>%
   pull(clueGiverID)
 
-d <- read_csv(here("data/exp1/exp1-cleaned.csv")) %>%
+d <- read_csv(here("data/exp1/cleaned.csv")) %>%
   filter(clueGiverID %in% inclusions) %>%
   select(-Level) %>%
   left_join(d.newlevels %>% select(wordpair, level))
@@ -145,19 +179,18 @@ d %>%
 ## Manipulation check
 
 ```{r}
-ggplot(d.newlevels, aes(x = correct, fill = level)) +
-    geom_histogram(bins = 13) +
-    geom_vline(xintercept = c(.66, .20)) +
-    labs(x = '% correct', title = 'Difficulty distribution of clues') +
-    theme_few()
+ggplot(d.newlevels, aes(x = correct*100, fill = level)) +
+    geom_histogram(bins = 20) +
+    geom_vline(xintercept = c(66, 25)) +
+    labs(x = '% correct') +
+    theme_few() +
+    scale_fill_few()
+
+ggsave(here('analysis/plots/difficulty_dist.pdf'), units = 'in', width = 7, height = 4)
 ```
 
 ```{r}
-d.raw %>% group_by(level) %>% tidyboot_mean(correct, nboot = 10) %>% 
-  ggplot(aes(x = level, y = empirical_stat)) +
-    geom_bar(stat = 'identity') +
-    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    theme_few()
+d.raw %>% group_by(level) %>% tidyboot_mean(correct, nboot = 1) 
 ```
 
 ```{r}
@@ -170,12 +203,22 @@ d.raw %>% group_by(level) %>% tidyboot_mean(GUESS_2_FINAL_TIME, nboot = 1000, na
 ```
 
 ```{r}
-d.raw %>% group_by(level) %>% tidyboot_mean(TBOption1, nboot = 1000, na.rm = T) %>% 
-  ggplot(aes(x = level, y = empirical_stat)) +
+d.raw %>% group_by(level) %>% tidyboot_mean(TEOption1, nboot = 1000, na.rm = T) %>% 
+  ggplot(aes(x = level, y = empirical_stat, fill = level)) +
     geom_bar(stat = 'identity') +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    labs(y = 'time to first keypress') +
-    theme_few()
+    labs(y = 'time to generate first clue (ms)') +
+    theme_few() +
+    scale_fill_few() +
+    theme(aspect.ratio = 1, legend.position = 'none')
+
+ggsave(here('analysis/plots/generation_time.pdf'), units = 'in', width = 4, height = 4)
+```
+
+```{r}
+d.raw %>%
+  lm(TEOption1 ~ level, data = .) %>%
+  summary()
 ```
 
 ## Order effects
@@ -186,7 +229,6 @@ d.order <- d %>%
   spread(seqOrder, correctedClue) %>%
   gather(seqOrder, correctedClue, starts_with('clueOption')) %>%
   mutate(match = clueFinal == correctedClue)
-
 
 d.order %>%
   group_by(seqOrder, level) %>%
@@ -201,6 +243,8 @@ d.order %>%
     scale_fill_colorblind(name = "order") +
     labs(y = 'proportion matching final clue', x = 'difficulty') +
     theme(aspect.ratio = 1)
+
+ggsave(here('analysis/plots/order.pdf'), units = 'in', width = 4, height = 3)
 ```
 
 ```{r}
@@ -213,6 +257,20 @@ d.order %>%
   summary()
 ```
 
+```{r}
+d.order %>% left_join(vocab %>% rename(correctedClue = Word, freq= LgSUBTLWF), by = "correctedClue") %>%
+  group_by(seqOrder, level) %>%
+  summarize(m = mean(freq, na.rm = T)) %>%
+  mutate(level = fct_relevel(level, 'Easy', 'Medium')) %>%
+  ggplot(aes(x = level, y = m, fill = seqOrder)) +
+    geom_bar(stat = 'identity', position = 'dodge') +
+    theme_few() +
+    scale_fill_colorblind(name = "order") +
+    labs(y = 'proportion matching final clue', x = 'difficulty') +
+    theme(aspect.ratio = 1)
+
+```
+
 # 3. Model results
 
 ## examine walk scores
@@ -220,82 +278,67 @@ d.order %>%
 # Examine how far you have to go to find clue
 
 ```{r}
-indices = read_csv(here("data/exp1/model_output/indices.csv")) %>% 
-  pivot_longer(names_to = 'key', values_to = 'value', 
-               cols = c(starts_with('w1'), starts_with('w2'))) %>%
-  separate(key, into = c('walk', 'i'), sep = '_index_walk') %>% 
-  pivot_wider(names_from = "walk", values_from = "value") %>%
-  mutate(union = reduce(across(w1:w2), pmin),
-         intersection = reduce(across(w1:w2), pmax)) 
-
-indices_permuted = read_csv(here("data/exp1/model_output/indices_permuted.csv")) %>% 
-  pivot_longer(names_to = 'key', values_to = 'value', 
-               cols = c(starts_with('w1'), starts_with('w2'))) %>%
-  separate(key, into = c('walk', 'i'), sep = '_index_walk') %>% 
-  pivot_wider(names_from = "walk", values_from = "value") %>%
-  mutate(union = reduce(across(w1:w2), pmin),
-         intersection = reduce(across(w1:w2), pmax)) 
-
 bind_rows(
-  indices %>% mutate(src = 'empirical')
-  #indices_permuted %>% mutate(src = 'permuted') 
+  read_csv(here("data/exp1/model_output/ranks.csv"))  %>% mutate(src = 'empirical'),
+  read_csv(here("data/exp1/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
-  filter(is.na(intersection) | is.na(union) | is.na(w1) | is.na(w2)) %>%
-  group_by(src, wordpair, Level, seqOrder,clueGiverID, correctedClue) %>%
-  summarize(intersection = mean(intersection), union = mean(union), w1 = mean(w1), w2 = mean(w2)) %>% #arrange(wordpair, clueGiverID) %>%
-  bind_rows(read_csv(here("data/exp1/model_output/freq_scores.csv"))) %>%
-  bind_rows(read_csv(here("data/exp1/model_output/midpoint_scores.csv"))) %>%
-  pivot_longer(names_to = 'measure', values_to = 'value', 
-             cols = c(union, intersection, w1, w2)) %>% #  union_index_permuted, intersection_index_permuted, freq_index, mid_index
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(wordpair, measure, clueGiverID) %>%
-  mutate(l = length(value)) %>%
-  group_by(measure, src, seqOrder, Level) %>%
+  mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
+  group_by(src, wordpair, Level, seqOrder,clueGiverID, correctedClue) %>%
+  summarize(intersection = mean(intersection), union = mean(union), single = mean(c(w1_index_walk, w2_index_walk))) %>% 
+  # %>%
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+  # bind_rows(read_csv(here("data/exp1/model_output/freq_scores.csv"))) %>%
+  # bind_rows(read_csv(here("data/exp1/model_output/midpoint_scores.csv"))) %>%
+  pivot_longer(names_to = 'measure', values_to = 'value', 
+               cols = c(union, intersection, single)) %>% 
+  group_by(measure, seqOrder, src, Level) %>%
   tidyboot_mean(value, nboot=100, na.rm = T) %>%
-  ggplot(aes(x = seqOrder, y = empirical_stat, color = Level, linetype = src, group = interaction(Level, src))) +
-    geom_point() +
+  ggplot(aes(x = seqOrder, y = empirical_stat, color = Level, linetype = src, group = interaction(src, Level))) +
+    #geom_point(size = 0.5) +
     geom_line() +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    facet_grid(measure ~ Level, scales = 'free') +
-    scale_color_colorblind() +
+    facet_grid( ~ measure) +
+    scale_color_few() +
     scale_x_discrete(guide = guide_axis(angle = 90)) +
     theme_few() +
     labs(x = '', y = 'first occurrence') 
 
-ggsave("../analysis/plots/exp1_plot1.pdf", width = 10, height = 7, units = 'in')
+ggsave("../analysis/plots/exp1_plot1.pdf", width = 6, height = 4, units = 'in')
 ```
 
-```{r}
-read_csv(here("data/exp1/indices.csv")) %>%
-  ggplot(aes(x = intersection_index)) +
-    geom_histogram() +
-    theme_few()
-```
-# 
 
 ```{r}
 d.scores <- bind_rows(
   read_csv(here("data/exp1/model_output/scores.csv")) %>% mutate(src = 'empirical'),
   read_csv(here("data/exp1/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
-  gather(budget, value, union_2:intersection_8192) %>%
+  filter(seqOrder %in% c('clueFinal', 'clueOption1', 'clueOption2', 'clueOption3')) %>%
+  gather(budget, value, union_2:w2_8192) %>%
+  separate(budget, into = c('strategy', 'budget')) %>% 
+  filter(strategy != 'freq') %>%
+  mutate(strategy = fct_collapse(strategy, single = c('w1', 'w2'))) %>%
   select(-Level) %>%
   left_join(d.levels) %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, src, level) %>%
-  tidyboot_mean(value, nboot=100, na.rm = TRUE) %>%
-  separate(budget, into = c('strategy', 'budget'))
-  
+  group_by(budget, src, level, strategy) %>%
+  summarize(empirical_stat = mean(value, na.rm = T), 
+            ci_upper = empirical_stat + 2 * sd(value, na.rm=T)/sqrt(length(value)),
+            ci_lower = empirical_stat - 2 * sd(value, na.rm=T)/sqrt(length(value))
+  ) 
+
 d.scores %>%
-  filter(src == 'empirical') %>%
-  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = strategy, group = strategy)) +
+  ggplot(aes(x = as.numeric(budget), y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
     geom_line(size=1, position = 'dodge') +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    facet_grid( ~ level, scales = 'free') +
+    facet_grid( ~ strategy, scales = 'free') +
     theme_few() +
-    scale_color_colorblind()+
+    scale_color_few()+
     scale_x_log10() +
-    labs(x = 'budget', y = 'P(visit)')
+    labs(x = 'budget', y = 'P(visit)') +
+    theme(aspect.ratio = 1)
+
+ggsave("../analysis/plots/exp1_plot1.pdf", width = 6, height = 4, units = 'in')
 ```
 
 
