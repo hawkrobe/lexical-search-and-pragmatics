@@ -95,8 +95,8 @@ class SWOW:
     for word1, word2 in zip(self.target_df['Word1'], self.target_df['Word2']) :
       w1_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word1])])
       w2_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word2])])
-      d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(10)}
-      d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(10)})
+      d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(1000)}
+      d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(1000)})
       with open(f'{exp_path}/model_output/{word1}-{word2}-walks.json', 'w', encoding ='utf8') as json_file:
         json.dump(d, json_file, ensure_ascii = False)
 
@@ -222,8 +222,8 @@ class SWOW:
 if __name__ == "__main__":
   swow = SWOW('../data/exp1')
   np.random.seed(444)
-  #  swow.save_candidates()
+  swow.save_candidates()
   # swow.save_scores('../data/exp1/exp1-cleaned.csv', permute = False)
   # swow.save_scores('../data/exp1/exp1-cleaned.csv', permute = True)
-  swow.save_rank_order('../data/exp1/', permute = False)
-  swow.save_rank_order('../data/exp1/', permute = True)
+  # swow.save_rank_order('../data/exp1/', permute = False)
+  # swow.save_rank_order('../data/exp1/', permute = True)
