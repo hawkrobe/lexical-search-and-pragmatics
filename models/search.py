@@ -192,10 +192,10 @@ class SWOW:
       unions.append(union)
 
     new_cols = defaultdict(list)
-    new_cols[f'w1_index_walk'] = [np.mean([w1.index(clue_node) for w1 in w1_walks_ord if clue_node in w1]) for clue_node in clue_nodes]
-    new_cols[f'w2_index_walk'] = [np.mean([w2.index(clue_node) for w2 in w2_walks_ord if clue_node in w2]) for clue_node in clue_nodes]
-    new_cols[f'intersection'] = [np.mean([intersect.index(clue_node) for intersect in intersections if clue_node in intersect]) for clue_node in clue_nodes]
-    new_cols[f'union'] = [np.mean([union.index(clue_node) for union in unions if clue_node in union]) for clue_node in clue_nodes]
+    new_cols[f'w1_index_walk'] = [np.mean([w1.index(clue_node) if clue_node in w1 else len(w1) for w1 in w1_walks_ord ]) for clue_node in clue_nodes]
+    new_cols[f'w2_index_walk'] = [np.mean([w2.index(clue_node) if clue_node in w2 else len(w2) for w2 in w2_walks_ord ]) for clue_node in clue_nodes]
+    new_cols[f'intersection'] = [np.mean([intersect.index(clue_node) if clue_node in intersect else len(intersect) for intersect in intersections]) for clue_node in clue_nodes]
+    new_cols[f'union'] = [np.mean([union.index(clue_node) if clue_node in union else len(union) for union in unions if clue_node in union]) for clue_node in clue_nodes]
     return pd.concat(
       [group.reset_index(), pd.DataFrame.from_dict(new_cols)],
       axis = 1
@@ -225,8 +225,8 @@ if __name__ == "__main__":
   swow = SWOW('../data/exp1')
 
   np.random.seed(1235)
-  swow.save_candidates('../data/exp1')
+#  swow.save_candidates('../data/exp1')
   # swow.save_scores('../data/exp1/', permute = False)
   # swow.save_scores('../data/exp1/', permute = True)
-  # swow.save_rank_order('../data/exp1/', permute = False)
-  # swow.save_rank_order('../data/exp1/', permute = True)
+  swow.save_rank_order('../data/exp1/', permute = False)
+  swow.save_rank_order('../data/exp1/', permute = True)
