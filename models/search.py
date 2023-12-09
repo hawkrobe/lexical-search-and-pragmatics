@@ -225,8 +225,8 @@ if __name__ == "__main__":
   swow = SWOW('../data/exp1')
 
   np.random.seed(1235)
-#  swow.save_candidates('../data/exp1')
-  # swow.save_scores('../data/exp1/', permute = False)
-  # swow.save_scores('../data/exp1/', permute = True)
+  swow.save_candidates('../data/exp1')
+  swow.save_scores('../data/exp1/', permute = False)
+  swow.save_scores('../data/exp1/', permute = True)
   swow.save_rank_order('../data/exp1/', permute = False)
   swow.save_rank_order('../data/exp1/', permute = True)
