@@ -382,17 +382,18 @@ read_csv(here("data/exp1/model_output/mixture_scores.csv")) %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
   group_by(measure, alpha, seqOrder, src, level) %>%
   tidyboot_mean(value, nboot=10, na.rm = T) %>%
-  ggplot(aes(x = seqOrder, y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
+  ggplot(aes(x = alpha, y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
     geom_line() +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    facet_grid( ~ alpha) +
+    facet_grid( ~ seqOrder) +
     scale_color_few() +
-    scale_x_discrete(guide = guide_axis(angle = 90)) +
+    #scale_x_discrete(guide = guide_axis(angle = 90)) +
     theme_few() +
     scale_y_log10(limits=c(100,NA)) +
-    labs(x = '', y = 'first occurrence') +
+    labs(x = 'alpha', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
+ggsave("../analysis/plots/exp1_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
 ```
 
 
