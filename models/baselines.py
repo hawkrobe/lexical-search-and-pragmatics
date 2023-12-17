@@ -3,6 +3,7 @@ import numpy as np
 import math
 import scipy
 from collections import defaultdict
+from sklearn.preprocessing import MinMaxScaler
 
 class Baseline:
     '''
@@ -65,6 +66,82 @@ class Baseline:
             ],
             axis=1
         ).to_csv('/'.join(data_path.split('/')[:-1])+'/model_output/freq_scores.csv')
+      
+    def shared_neighbors(self, w1, w2, alpha):
+      # Read the strengths file
+      df = pd.read_csv("../data/walk_data/swow_strengths.csv")
+
+      # Find all neighbors of word1
+      neighbors_word1 = set(df[df['cue'] == w1]['response'].tolist())
+      
+      
+      # Find all neighbors of word2
+      neighbors_word2 = set(df[df['cue'] == w2]['response'].tolist())
+      
+
+      strength_dict = {}
+      freq_dict = {}
+
+      for word in self.vocab:
+          strength_to_word1 = df[(df['cue'] == w1) & (df['response'] == word)]['R123.Strength'].values[0] if word in neighbors_word1 else 0.0001
+          strength_to_word2 = df[(df['cue'] == w2) & (df['response'] == word)]['R123.Strength'].values[0] if word in neighbors_word2 else 0.0001
+          
+          combined_strength = strength_to_word1 * strength_to_word2
+
+          freqs = pd.read_csv("../data/exp1/model_input/vocab.csv")
+
+
+          log_freq = freqs[freqs['Word'] == word]['LgSUBTLWF'].values[0] if word in freqs['Word'].tolist() else 0.0001
+          
+          
+          strength_dict[word] = combined_strength
+          freq_dict[word] = log_freq
+
+      # z-score dicts
+
+      strength_dict = {k: v for k, v in zip(strength_dict.keys(), MinMaxScaler().fit_transform(np.array(list(strength_dict.values())).reshape(-1, 1)).flatten())}
+      freq_dict = {k: v for k, v in zip(freq_dict.keys(), MinMaxScaler().fit_transform(np.array(list(freq_dict.values())).reshape(-1, 1)).flatten())}
+
+      combined_scores_dict = {}
+      for word in self.vocab:
+          # Calculate combined score
+          combined_score = alpha * strength_dict[word] + (1 - alpha) * freq_dict[word]
+          combined_scores_dict[word] = combined_score
+
+      # z-score this combined score dict using MinMaxScaler
+      combined_scores_dict = {k: v for k, v in zip(combined_scores_dict.keys(), MinMaxScaler().fit_transform(np.array(list(combined_scores_dict.values())).reshape(-1, 1)).flatten())}    
+
+      
+      # sort by combined score in descending order and return the keys
+      combined_scores_dict = {k: v for k, v in sorted(combined_scores_dict.items(), key=lambda item: item[1], reverse=True)}
+      return list(combined_scores_dict.keys())
+    
+    def save_mixture_scores(self, data_path):
+      # import empirical clues (cleaned)
+      expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
+      scores = defaultdict(list)
+      alpha_dict = defaultdict(list)
+      rows = []
+      for a in np.arange(0, 1.1, 0.1):
+        print("alpha = ", a)
+        for name, group in expdata.groupby('wordpair') :
+              print("wordpair = ", name)
+              vocab_scores = self.shared_neighbors(group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0], alpha = a)              
+              clue_list = group['correctedClue'].to_numpy()
+              for clue in clue_list:
+                  index = vocab_scores.index(clue) if clue in vocab_scores else None
+                  scores['mixture_index'].append(index)
+                  alpha_dict['alpha'].append(a)
+              rows.append(group)
+
+      pd.concat(
+          [
+              pd.concat(rows,axis=0,ignore_index=True),
+              pd.DataFrame.from_dict(scores),
+              pd.DataFrame.from_dict(alpha_dict)
+          ],
+          axis=1
+      ).to_csv('/'.join(data_path.split('/')[:-1])+'/model_output/mixture_scores.csv')
 
 class nonRSA:
 
@@ -303,5 +380,6 @@ class utils:
 
 if __name__ == "__main__" :
     baseline = Baseline()
-    baseline.save_midpoint_scores('../data/exp1/cleaned.csv')
-    baseline.save_frequency_scores('../data/exp1/cleaned.csv')
+    #baseline.save_midpoint_scores('../data/exp1/cleaned.csv')
+    #baseline.save_frequency_scores('../data/exp1/cleaned.csv')
+    baseline.save_mixture_scores('../data/exp1/cleaned.csv')

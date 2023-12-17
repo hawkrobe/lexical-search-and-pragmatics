@@ -417,6 +417,39 @@ bind_rows(
 ggsave("../analysis/plots/exp1_ranks.pdf", width = 6, height = 4, units = 'in')
 ```
 
+## Examine mixture scores
+
+```{r}
+
+read_csv(here("data/exp1/model_output/mixture_scores.csv")) %>% 
+  mutate(src = 'empirical')%>%
+  select(-Level) %>%
+  left_join(d.levels) %>%
+  mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
+  group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue, alpha) %>%
+  summarize(mix = mean(mixture_index)) %>% 
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+  pivot_longer(names_to = 'measure', values_to = 'value', 
+               cols = c(mix)) %>% 
+  ungroup() %>%
+  mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
+  group_by(measure, alpha, seqOrder, src, level) %>%
+  tidyboot_mean(value, nboot=10, na.rm = T) %>%
+  ggplot(aes(x = alpha, y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
+    geom_line() +
+    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
+    facet_grid( ~ seqOrder) +
+    scale_color_few() +
+    #scale_x_discrete(guide = guide_axis(angle = 90)) +
+    theme_few() +
+    scale_y_log10(limits=c(100,NA)) +
+    labs(x = 'alpha', y = 'first occurrence') +
+    theme(aspect.ratio = 2)
+
+ggsave("../analysis/plots/exp1_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
+```
+
+
 ## Examine walk scores
 
 ```{r}
