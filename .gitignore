@@ -2,6 +2,8 @@
 /analysis/plots/
 /data/exp1/model_output
 /data/exp2/model_output
+*.gpickle
+*.pkl
 .Rhistory
 #R stuff
 *.html
