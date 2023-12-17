@@ -69,7 +69,7 @@ class Baseline:
       
     def shared_neighbors(self, w1, w2, alpha):
       # Read the strengths file
-      df = pd.read_csv("../data/walk_data/swow_strengths.csv")
+      df = pd.read_csv("../data/exp1/model_input/swow_strengths.csv")
 
       # Find all neighbors of word1
       neighbors_word1 = set(df[df['cue'] == w1]['response'].tolist())

@@ -89,7 +89,6 @@ class SWOW:
     return [self.index_to_name[index] if index in self.index_to_name else None
             for index in nodes]
 
-
   def save_candidates(self, exp_path) :
     '''
     write out walks in order of words visited
@@ -102,7 +101,6 @@ class SWOW:
       d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(1000)})
       with open(f'{exp_path}/model_output/{word1}-{word2}-walks.json', 'w', encoding ='utf8') as json_file:
         json.dump(d, json_file, ensure_ascii = False)
-
 
   def score(self, group) :
     # look up how often each clue was visited
@@ -156,8 +154,6 @@ class SWOW:
 
     with Parallel(n_jobs=30) as parallel:
       scores = parallel(delayed(self.score)(group) for name, group in expdata.groupby('wordpair'))
-      with open('../data/walk_data/scores.pkl', 'wb') as f:
-        pickle.dump(scores, f)
 
     # save to file
     pd.concat(scores).to_csv(
@@ -214,19 +210,17 @@ class SWOW:
 
     with Parallel(n_jobs=30) as parallel:
       ranks = parallel(delayed(self.rank)(group) for name, group in expdata.groupby('wordpair'))
-      with open('../data/walk_data/ranks.pkl', 'wb') as f:
-        pickle.dump(ranks, f)
 
     pd.concat(ranks).to_csv(
       f'{exp_path}/model_output/ranks{"_permuted" if permute else ""}.csv'
     )
 
 if __name__ == "__main__":
-  swow = SWOW('../data/exp1')
+  swow = SWOW('../data/exp2')
 
   np.random.seed(1235)
-  swow.save_candidates('../data/exp1')
-  swow.save_scores('../data/exp1/', permute = False)
-  swow.save_scores('../data/exp1/', permute = True)
-  swow.save_rank_order('../data/exp1/', permute = False)
-  swow.save_rank_order('../data/exp1/', permute = True)
+  swow.save_candidates('../data/exp2')
+  # swow.save_scores('../data/exp1/', permute = False)
+  # swow.save_scores('../data/exp1/', permute = True)
+  # swow.save_rank_order('../data/exp1/', permute = False)
+  # swow.save_rank_order('../data/exp1/', permute = True)
