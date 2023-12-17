@@ -1,4 +1,7 @@
 .DS_Store
+/analysis/plots/
+/data/exp1/model_output
+/data/exp2/model_output
 .Rhistory
 #R stuff
 *.html
@@ -135,3 +138,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+.Rproj.user
