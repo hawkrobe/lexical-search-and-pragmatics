@@ -4,33 +4,29 @@ output: html_notebook
 ---
 
 
-# E2: speaker selections
+# 1. speaker selections
 
 ```{r}
-setwd('../../data/exp2')
+d.exp2 <- here("data/exp2/corrected.csv") |> 
+  read_csv() |>
+  distinct() |>
+  select(wordpair, correctedClue, clueCount, Level)
 
-e2_clues = read_csv("e2_corrected.csv") %>% 
-  mutate(wordpair = gsub(' - ', '-', wordpair)) %>%
-  rename(clue = correctedClue)%>%
-  distinct()%>%
-  select(wordpair, clue, clueCount, Level)
-
-search = read_csv("scores.csv") %>%
+search <- read_csv(here("data/exp2/model_input/scores.csv")) %>%
   pivot_longer(names_to = "model", cols = union2:intersection512)%>%
-  rename(clue = correctedClue)%>%
+  rename(clue = correctedClue) %>%
   separate(model, into = c("type", "budget"), "(?<=[a-z])(?=[0-9])")%>%
   mutate(value = value/1000)
 ```
 
-
-
 ## overall patterns
 
 ```{r}
-e2_search =search %>%
+e2_search = search %>%
     mutate(model= "walk-only", alpha = "walk-only",
            wordpair = gsub('\\s+', '', wordpair))%>%
   select(wordpair, boardnames, budget, clue, model, alpha, type, value )
+
 max(e2_search$value)
 
 e2_nonRSA = read_csv("nonRSAprobs.csv") %>% mutate(model = "nonRSA", alpha = as.character(alpha)) 
@@ -67,7 +63,9 @@ e2_plot = e2_sumLL %>%
 ggsave("../../analysis/plots/exp2_plot.pdf", e2_plot)
 
 ```
+
 ## item analysis
+
 ```{r}
 e2_behavioral = e2_clues %>% select(wordpair, clue, clueCount) %>%
   group_by(wordpair) %>%
@@ -96,3 +94,31 @@ e2_combined_models %>% left_join(targets)%>%
   summarize(cor(value, clueCount))
 ```
 
+## Compute costs for the whole vocab
+
+```{r}
+pairs <- clues %>% pull(wordpair) %>% unique()
+
+getWalks <- function(pair) {
+  paste0('data/exp1/model_output/', pair, '-walks.json', collapse = '') %>%
+    here() %>%
+    fromJSON() %>% 
+    as_tibble() %>%
+    mutate(step = row_number()) %>%
+    gather(walk, correctedClue, -step) %>%
+    mutate(walk = gsub('walk-', '', walk),
+           start = ifelse(as.integer(walk) %% 2 == 0, 'w1', 'w2')) %>% 
+    right_join(clues %>% filter(wordpair == pair), by = c('correctedClue')) %>%
+    group_by(walk, correctedClue, wordpair) %>%
+    select(-start) %>%
+    filter(step == first(step)) %>%
+    group_by(step, correctedClue, wordpair) %>%
+    tally() %>%
+    ungroup() %>%
+    group_by(wordpair) %>%
+    complete(correctedClue, step = min(step):max(step), fill = list(n=0)) %>%
+    group_by(correctedClue, wordpair) %>%
+    mutate(cdf = cumsum(n)/2000) %>%
+    return()
+}
+```
