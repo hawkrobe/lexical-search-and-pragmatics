@@ -13,24 +13,25 @@ from scipy.special import softmax
 
 class RSA:
   def __init__(self, exp_path) :
-    with open(f'{exp_path}/boards.json', 'r') as json_file:
+    self.exp_path = exp_path
+    self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
+    self.targets = pd.read_csv(f"{exp_path}/model_input/targets.csv")
+    self.cluedata = pd.read_csv(f"{exp_path}/finalClues.csv")
+    with open(f'{exp_path}/model_input/boards.json', 'r') as json_file:
       self.boards = json.load(json_file)
 
     self.representations = {
-      'glove' : pd.read_csv(f"{exp_path}/model_input/glove_embeddings.csv").transpose().values,
       'swow' : pd.read_csv(f"{exp_path}/model_input/swow_embeddings.csv").transpose().values
     }
 
+    print(self.representations['swow'].shape)
+
+    self.create_board_combos()
     self.sims = {
       modelname : {boardname : self.create_sim_matrix(modelname, boardname)
                    for boardname in self.boards.keys()}
       for modelname in self.representations.keys()
     }
-
-    self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
-    self.targets = pd.read_csv(f"{exp_path}/targets.csv")
-    self.cluedata = pd.read_csv(f"{exp_path}/finalClues.csv")
-    self.create_board_combos()
 
   def create_board_combos(self):
     '''
@@ -39,9 +40,9 @@ class RSA:
     self.board_combos = {}
     for board_name, board in self.boards.items() :
       all_possible_combs = list(itertools.combinations(board, 2))
-      combs_df = pd.DataFrame(all_possible_combs, columns =['Word1', 'Word2'])
-      combs_df["wordpair"] = combs_df["Word1"] + '-'+ combs_df["Word2"]
-      self.board_combos[board_name] = combs_df
+      combo_df = pd.DataFrame(all_possible_combs, columns =['Word1', 'Word2'])
+      combo_df["wordpair"] = combo_df["Word1"] + '-'+ combo_df["Word2"]
+      self.board_combos[board_name] = combo_df
 
   def create_sim_matrix(self, modelname, boardname):
     '''
@@ -64,13 +65,16 @@ class RSA:
     ## specifically, for each possible pair, pull out
     board_df.reset_index(inplace = True)
     f_w1 = [clue_sims[board_df[board_df["Word"]==row["Word1"]].index.values[0]]
-            for  index, row in combs_df.iterrows()]
+            for  index, row in combo_df.iterrows()]
     f_w2 = [clue_sims[board_df[board_df["Word"]==row["Word2"]].index.values[0]]
-            for  index, row in combs_df.iterrows()]
+            for  index, row in combo_df.iterrows()]
 
     # result is of length 190 for the product of similarities (i.e. how similar each word i is to BOTH in pair)
     # note that cosine is in range [-1, 1] so we have to convert to [0,1] for this conjunction to be valid
     return ((np.array(f_w1) + 1) /2) * ((np.array(f_w2) + 1)/2)
+
+  def cost(self, boardname, modelname) :
+    return
 
   def literal_guesser(self, boardname, modelname):
     '''
@@ -90,7 +94,7 @@ class RSA:
     softmax likelihood of each possible clue
     '''
     literal_guesser_prob = np.log(self.literal_guesser(boardname, modelname))
-    clues_cost = -self.vocab["LgSUBTLWF"]
+    clues_cost = self.costs[modelname][boardname]
     utility = (1-costweight) * literal_guesser_prob - costweight * clues_cost
     return softmax(beta * utility, axis = 1)
 
@@ -98,29 +102,29 @@ class RSA:
     speaker_prob = np.log(self.pragmatic_speaker(boardname, modelname, beta, costweight))
     return softmax(speaker_prob, axis = 0)
 
-  def get_speaker_scores(self, speaker_word_pairs, probsarray, probsarray_sorted) :
+  def get_speaker_scores(self, expdata, probsarray, probsarray_sorted) :
     '''
     takes a set of clues and word pairs, and computes the probability and rank of each clue
     inputs:
-    (1) cluedata: a subset of expdata with relevant clues and wordpairs
-    (2) speaker_word_pairs: the specific wordpairs for which probabilities need to be computed
-    (3) probsarray: a 3 x candidates array of pragmatic speaker predictions
-    (4) probsarray_sorted: a sorted 3 x candidates array of pragmatic speaker predictions
+    (2) target_word_pair: the specific wordpairs for which probabilities need to be computed
+    (3) probsarray: a candidates array of pragmatic speaker predictions
+    (4) probsarray_sorted: a sorted candidates array of pragmatic speaker predictions
 
     outputs:
     softmax probabilities and ranks for each candidate in cluedata
     '''
     speaker_prob = []
     speaker_rank = []
-    for index, row in self.cluedata.iterrows():
-        clue1 = row["Clue1"]
+    for index, row in expdata.iterrows():
+        clue1 = row["correctedClue"]
         wordpair = str(row["wordpair"]).replace(" ", "")
 
         # find index of clue
         if clue1 in list(self.vocab["Word"]):
             clue_index = list(self.vocab["Word"]).index(clue1)
-            clue_probs = probsarray[clue_index]
-            clue_rank = np.nonzero(probsarray_sorted==clue_index)[1]
+            wordpair_index = list(self.board_combos[row['boardnames']]['wordpair']).index(wordpair)
+            clue_probs = probsarray[wordpair_index,clue_index]
+            clue_rank = np.nonzero(probsarray_sorted==clue_index)[1][wordpair_index]
         else:
             clue_rank = "NA"
             clue_probs = "NA"
@@ -129,7 +133,7 @@ class RSA:
         speaker_rank.append(clue_rank)
     return speaker_prob, speaker_rank
 
-  def get_speaker_df(params):
+  def get_speaker_df(self, params):
     '''
     returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations
     over a given set of candidates
@@ -146,24 +150,26 @@ class RSA:
       print("optimal_params =", optimal_params)
 
       for index, row in self.targets.iterrows():
-        speakerprob_df = pd.DataFrame()
+        print(index, row)
         boardname = row["boardnames"]
         target_wordpair = row['wordpair']
-        board = self.board[boardname]
-        wordpairlist = list(self.board_combos[board_name]['wordpair'])
+        board = self.boards[boardname]
         y = self.pragmatic_speaker(boardname, modelname, optimal_params[0], optimal_params[1])
-        y_sorted = np.argsort(-predictions)
-        expdata_board = self.cluedata[(self.cluedata["Board"] == row["Board"]) &
-                                      (self.cluedata["Experiment"] == row["Experiment"]) &
-                                      (self.cluedata["Clue1"].isin(self.vocab))]
+        y_sorted = np.argsort(-y)
+        expdata_board = self.cluedata.query("wordpair == @target_wordpair and boardnames == @boardname")
+        speaker_prob, speaker_rank = self.get_speaker_scores(expdata_board, y, y_sorted)
+        expdata_board["representation"] = modelname
+        expdata_board["prag_speaker_probs"] = speaker_prob
+        expdata_board["prag_speaker_rank"] = speaker_rank
+        speakerprobs_dfs.append(expdata_board)
 
-        speaker_prob, speaker_rank = self.get_speaker_scores(y, y_sorted)
-        expdata_board.loc[:,"representation"] = modelname
-        expdata_board.loc[:,"prag_speaker_probs"] = speaker_prob
-        expdata_board.loc[:,"prag_speaker_rank"] = speaker_rank
-        speakerprobs_dfs.append(speakerprobs_df)
-
-    return pd.concat(speakerprobs_dfs)
+    pd.concat(speakerprobs_dfs).to_csv(
+      f'{self.exp_path}/model_output/speaker_df.csv'
+    )
 
 if __name__ == "__main__":
   rsa = RSA('../data/exp2/')
+  rsa.get_speaker_df({
+    'swow' : (25.1522030761838, 0.03863169001849234),
+    'glove' : (22.336514544537227, 0.039)
+  })
