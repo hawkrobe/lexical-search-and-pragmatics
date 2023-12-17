@@ -5190,8 +5190,6 @@ clueGiverID,wordpair,Level,Word1,Word2,seqOrder,correctedClue
 490624,oak-tree,Easy,oak,tree,clueOption2,pine
 490624,oak-tree,Easy,oak,tree,clueOption3,wood
 490624,oak-tree,Easy,oak,tree,clueFinal,nature
-491095,oak-tree,Easy,oak,tree,clueOption1,oak
-491095,oak-tree,Easy,oak,tree,clueOption2,tree
 491095,oak-tree,Easy,oak,tree,clueOption3,plant
 491095,oak-tree,Easy,oak,tree,clueOption4,trunk
 491095,oak-tree,Easy,oak,tree,clueOption5,roots
