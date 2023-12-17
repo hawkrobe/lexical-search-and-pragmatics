@@ -36,7 +36,7 @@ class SWOW:
     self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
     self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
     self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
-    self.vocab_size = list(self.vocab.Word)
+    self.vocab_size = len(list(self.vocab.Word))
     self.construct_graph(exp_path)
     self.index_to_name = {k: v['word'] for k,v in self.graph.nodes(data=True)}
     self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
@@ -123,7 +123,7 @@ class SWOW:
         w2_counts = Counter(w2_walk[: search_budget])
         intersect = w1_counts & w2_counts
         union = w1_counts | w2_counts
-        for node in range(len(self.vocab_size)) :
+        for node in range(self.vocab_size) :
           intersect_avg[search_budget][node] += [(intersect[node]/(intersect.total() + 1) + 0.000001) if node in intersect else 0.0000001]
           union_avg[search_budget][node] += [(union[node]/(union.total() + 1) + 0.000001) if node in union else 0.0000001]
           w1_avg[search_budget][node] += [(w1_counts[node]/(w1_counts.total() + 1) + 0.000001) if node in w1_counts else 0.0000001]
@@ -160,10 +160,10 @@ class SWOW:
       f'{exp_path}/model_output/scores{"_permuted" if permute else ""}.csv'
     )
 
-  def rank(self, group) :
+  def rank(self, group, clues_only = True) :
     # convert words to nodes
     target_nodes = self.get_nodes_by_word([group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0]])
-    clue_nodes = self.get_nodes_by_word(group['correctedClue'].to_numpy())
+    clue_nodes = self.get_nodes_by_word(group['correctedClue'].to_numpy()) if clues_only else range(self.vocab_size)
     
     # loop through 10000 pairs of walks to get indices of first appearances
     w1_walks = np.array([x for x in self.rw if x[0] == target_nodes[0]]).tolist()
@@ -192,10 +192,10 @@ class SWOW:
     new_cols[f'w2_index_walk'] = [np.mean([w2.index(clue_node) if clue_node in w2 else len(w2) for w2 in w2_walks_ord ]) for clue_node in clue_nodes]
     new_cols[f'intersection'] = [np.mean([intersect.index(clue_node) if clue_node in intersect else len(intersect) for intersect in intersections]) for clue_node in clue_nodes]
     new_cols[f'union'] = [np.mean([union.index(clue_node) if clue_node in union else len(union) for union in unions if clue_node in union]) for clue_node in clue_nodes]
-    return pd.concat(
-      [group.reset_index(), pd.DataFrame.from_dict(new_cols)],
-      axis = 1
-    )
+    return pd.concat([
+      group.reset_index() if clues_only else vocab.reset_index(),
+      pd.DataFrame.from_dict(new_cols)
+    ], axis = 1)
     
   def save_rank_order(self, exp_path, permute = False):
     '''
@@ -215,12 +215,13 @@ class SWOW:
       f'{exp_path}/model_output/ranks{"_permuted" if permute else ""}.csv'
     )
 
+
 if __name__ == "__main__":
   swow = SWOW('../data/exp2')
 
   np.random.seed(1235)
-  swow.save_candidates('../data/exp2')
-  # swow.save_scores('../data/exp1/', permute = False)
-  # swow.save_scores('../data/exp1/', permute = True)
-  # swow.save_rank_order('../data/exp1/', permute = False)
-  # swow.save_rank_order('../data/exp1/', permute = True)
+  # swow.save_candidates('../data/exp2')
+  swow.save_scores('../data/exp2/', permute = False)
+  swow.save_scores('../data/exp2/', permute = True)
+  swow.save_rank_order('../data/exp2/', permute = False)
+  swow.save_rank_order('../data/exp2/', permute = True)
