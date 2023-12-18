@@ -19,22 +19,84 @@ library(jsonlite)
 ```{r}
 d.exp2 <- read_csv(here("data/exp2/cleaned.csv"))
 
-here("data/exp2/model_output/speaker_df.csv") |> 
-  read_csv() |>
-  select(wordpair, alpha, costweight, correctedClue, Level,cost,prag_speaker_probs,prag_speaker_rank) %>%
-  mutate(prob = log(prag_speaker_probs)) %>%
-  group_by(cost, alpha, costweight, Level) %>%
+likelihoods <- bind_rows(
+  read_csv(here("data/exp2/model_output/speaker_df_cdf_prag.csv")) %>% 
+    rename(budget = cost) %>% mutate(model = 'search+prag'),
+  read_csv(here("data/exp2/model_output/speaker_df_cdf_no_prag.csv")) %>% 
+    rename(budget = cost) %>% mutate(model = 'no_prag'),
+  read_csv(here("data/exp2/model_output/speaker_df_freq_prag.csv")) %>% 
+    mutate(model = 'no_search'),
+) |> 
+  select(model, wordpair, alpha, costweight, correctedClue, Level, budget, prag_speaker_probs, prag_speaker_rank) %>%
+  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
+  group_by(budget, model, alpha, costweight, Level) %>%
   summarize(rank = mean(prag_speaker_rank, na.rm = T),
-            loglik = sum(prob, na.rm = T)) %>%
-  group_by(cost, Level, costweight) %>%
-  filter(loglik == max(loglik)) %>%
-  ggplot(aes(x = costweight, y = rank, color = alpha)) +
-    geom_line() +
-    facet_grid(Level ~ cost) +
-    scale_x_log10() +
-    theme_few()
+            loglik = sum(log(prag_speaker_probs), na.rm = T)) 
 
+likelihoods %>%
+  group_by(model, Level, budget) %>%
+  filter(loglik == max(loglik)) %>%
+  ggplot(aes(x = budget, y = loglik, color = Level)) +
+    geom_line(stat = 'identity', data = . %>% filter(model == 'search+prag')) +
+    geom_hline(aes(yintercept = loglik, color = Level), linetype = 'dashed', data = . %>% filter(model == 'no_search')) +
+    geom_line(aes(yintercept = loglik, color = Level), linetype = 'dotted', data = . %>% filter(model == 'no_prag')) +
+    geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
+    facet_wrap(~ Level) +
+    scale_x_log10(limits = c(1, 10000)) +
+    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    theme_few() +
+    labs(x = "search budget") +
+    theme(aspect.ratio = 1, legend.position = 'none')
+
+ggsave(here('analysis/plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width = 7)
 ```
+
+
+```{r}
+likelihoods %>%
+  group_by(model, Level) %>%
+  filter(loglik == max(loglik)) 
+  
+```
+
+
+
+```{r}
+likelihoods %>%
+  group_by(Level, model, costweight) %>%
+  filter(loglik == max(loglik)) %>%
+  ggplot(aes(x = costweight, y = loglik, color = model)) +
+    geom_line() +
+    facet_grid( ~ Level) +
+    scale_x_log10() +
+    geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
+    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    theme_few() +
+    labs(x = "cost weight") +
+    theme(aspect.ratio = 1)
+```
+
+
+```{r}
+likelihoods %>%
+  group_by(Level, model, budget, costweight) %>%
+  mutate(loglik = ifelse(loglik < -6000, -6000, loglik)) %>%
+  filter(loglik == max(loglik)) %>%
+  ungroup() %>%
+  complete(Level, model, budget, costweight, fill = list(loglik = NA)) %>%
+  group_by(Level, model, costweight) %>%
+  mutate(loglik = ifelse(is.na(loglik), mean(loglik, na.rm = T), loglik)) %>%
+ggplot(aes(x = costweight, y = budget, fill = loglik)) +
+    geom_tile(stat = 'identity', height=.33, width=.33) +
+    facet_grid(model ~ Level) +
+    scale_x_log10() +
+    scale_y_log10() +
+    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    theme_few() +
+    labs(x = "search budget") +
+    theme(aspect.ratio = 1)
+```
+
 
 ## overall patterns
 
@@ -152,13 +214,15 @@ cdfs <- with_progress({
 
 ```{r}
 complete_df <- read_csv(here('data/exp2/model_input/vocab.csv')) %>%
-  left_join(read_csv(here('data/exp2/model_output/cdfs.csv'))) %>%
-  select(Word,wordpair,step,cdf) %>%
-  complete(Word, wordpair, step, fill = list(cdf = 0)) %>%
+  left_join(read_csv(here('data/exp2/model_output/ranks.csv'))) %>%
+  mutate(single = (w1_index_walk + w2_index_walk)/2) %>%
+  select(-`...1`, -index, -Occurrences,-Length) %>%
+  gather(measure, value, -Word, -wordpair) %>%
+  complete(Word, wordpair, measure, fill = list(value = 0)) %>%
   filter(!is.na(step), !is.na(wordpair))
 
 read_csv(here('data/exp2/model_input/vocab.csv')) %>%
   left_join(complete_df) %>%
-  select(Word,wordpair,step,cdf) %>%
-  write_csv(here('data/exp2/model_output/cdfs_long.csv'))
+  select(Word,wordpair,measure,value) %>%
+  write_csv(here('data/exp2/model_output/freqs_long.csv'))
 ```

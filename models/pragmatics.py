@@ -29,22 +29,22 @@ class RSA:
       self.boards = json.load(json_file)
 
     self.create_board_combos()
-    self.create_cost_fn(cost_type)
+    self.create_cost_fn()
     self.sims = {
       boardname : self.create_sim_matrix(boardname)
       for boardname in self.boards.keys()
     }
 
-  def create_cost_fn(self, cost_type) :
+  def create_cost_fn(self) :
     print('building cost fn...')
     self.cost = {}
-    measure_df = pd.read_csv(f"{self.exp_path}/model_output/{cost_type}s_long.csv")
+    measure_df = pd.read_csv(f"{self.exp_path}/model_output/{self.cost_type}s_long.csv")
 
     # transform measures to costs -- higher rank means more costly but
     # lower score is more costly (need to invert)
-    if cost_type == 'rank' :
+    if self.cost_type == 'rank' :
       measure_df.loc[:,'value'] = np.log1p(measure_df.loc[:,'value'])
-    elif cost_type == 'freq':
+    elif self.cost_type == 'freq':
       measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
     else :
       measure_df.loc[:,'value'] = -1 * np.log(0.001 + measure_df.loc[:,'value'])
@@ -104,10 +104,11 @@ class RSA:
     '''
     softmax likelihood of each possible clue
     '''
+
     targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
     inf = (
       np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
-      if modelname == 'prag'
+      if self.inf_type == 'prag'
       else np.log(self.sims[boardname])[targetpair_idx].ravel()
     )
     cost = self.cost[modelname][targetpair]['value'].to_numpy().ravel()
@@ -159,6 +160,7 @@ class RSA:
       expdata_board.loc[:,"cost"] = params[0]
       expdata_board.loc[:,"alpha"] = params[1]
       expdata_board.loc[:,"costweight"] = params[2]
+      expdata_board.loc[:,"model"] = self.inf_type + self.cost_type
       expdata_board.loc[:,"prag_speaker_probs"] = speaker_prob
       expdata_board.loc[:,"prag_speaker_rank"] = speaker_rank
       speakerprobs_dfs.append(expdata_board)
@@ -167,13 +169,13 @@ class RSA:
 
 if __name__ == "__main__":
   # cdf / freq
-  cost_type = sys.argv[1] if sys.argv[1] is not None else 'cdf'
-  inf_type = sys.argv[2] if sys.argv[2] is not None else 'prag'
+  cost_type = sys.argv[1] if len(sys.argv) > 1 else 'cdf'
+  inf_type = sys.argv[2] if len(sys.argv) > 2 else 'prag'
   exp_path = '../data/exp2/'
   rsa = RSA(exp_path, inf_type, cost_type)
   param_grid = itertools.product(
     rsa.cost.keys(),
-    [1, 10, 20, 30, 40, 50],
+    [1, 2, 4, 8, 16, 32, 64],
     [0, 0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1]
   )
   out = pd.concat(list(tqdm(
@@ -183,5 +185,5 @@ if __name__ == "__main__":
     total = len(rsa.cost.keys()) * 6 * 9
   )))
   out.to_csv(
-    f'{exp_path}/model_output/speaker_df_{cost_type}.csv'
+    f'{exp_path}/model_output/speaker_df_{cost_type}_{inf_type}.csv'
   )
