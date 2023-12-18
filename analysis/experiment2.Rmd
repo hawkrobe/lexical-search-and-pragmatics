@@ -3,20 +3,37 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+# Imports
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(ggthemes)
+library(tidyboot)
+library(here)
+library(jsonlite)
+```
 
 # 1. speaker selections
 
 ```{r}
-d.exp2 <- here("data/exp2/corrected.csv") |> 
-  read_csv() |>
-  distinct() |>
-  select(wordpair, correctedClue, clueCount, Level)
+d.exp2 <- read_csv(here("data/exp2/cleaned.csv"))
 
-search <- read_csv(here("data/exp2/model_input/scores.csv")) %>%
-  pivot_longer(names_to = "model", cols = union2:intersection512)%>%
-  rename(clue = correctedClue) %>%
-  separate(model, into = c("type", "budget"), "(?<=[a-z])(?=[0-9])")%>%
-  mutate(value = value/1000)
+here("data/exp2/model_output/speaker_df.csv") |> 
+  read_csv() |>
+  select(wordpair, alpha, costweight, correctedClue, Level,cost,prag_speaker_probs,prag_speaker_rank) %>%
+  mutate(prob = log(prag_speaker_probs)) %>%
+  group_by(cost, alpha, costweight, Level) %>%
+  summarize(rank = mean(prag_speaker_rank, na.rm = T),
+            loglik = sum(prob, na.rm = T)) %>%
+  group_by(cost, Level, costweight) %>%
+  filter(loglik == max(loglik)) %>%
+  ggplot(aes(x = costweight, y = rank, color = alpha)) +
+    geom_line() +
+    facet_grid(Level ~ cost) +
+    scale_x_log10() +
+    theme_few()
+
 ```
 
 ## overall patterns
@@ -97,28 +114,51 @@ e2_combined_models %>% left_join(targets)%>%
 ## Compute costs for the whole vocab
 
 ```{r}
-pairs <- clues %>% pull(wordpair) %>% unique()
+pairs <- d.exp2 %>% pull(wordpair) %>% unique()
 
 getWalks <- function(pair) {
-  paste0('data/exp1/model_output/', pair, '-walks.json', collapse = '') %>%
+  paste0('data/exp2/model_output/', pair, '-walks.json', collapse = '') %>%
     here() %>%
     fromJSON() %>% 
     as_tibble() %>%
     mutate(step = row_number()) %>%
-    gather(walk, correctedClue, -step) %>%
+    gather(walk, Word, -step) %>%
     mutate(walk = gsub('walk-', '', walk),
-           start = ifelse(as.integer(walk) %% 2 == 0, 'w1', 'w2')) %>% 
-    right_join(clues %>% filter(wordpair == pair), by = c('correctedClue')) %>%
-    group_by(walk, correctedClue, wordpair) %>%
-    select(-start) %>%
+           wordpair = pair) %>% 
+    group_by(walk, Word, wordpair) %>%
     filter(step == first(step)) %>%
-    group_by(step, correctedClue, wordpair) %>%
+    group_by(step, Word, wordpair) %>%
     tally() %>%
     ungroup() %>%
     group_by(wordpair) %>%
-    complete(correctedClue, step = min(step):max(step), fill = list(n=0)) %>%
-    group_by(correctedClue, wordpair) %>%
+    complete(Word, step = 2**seq(13), fill = list(n=0)) %>%
+    group_by(Word, wordpair) %>%
+    arrange(step) %>%
     mutate(cdf = cumsum(n)/2000) %>%
-    return()
+    filter(step %in% 2**seq(13)) %>%
+    write_csv(here(paste0('data/exp2/model_output/', pair, '-cdf.csv',collapse = '')))
 }
+
+library(furrr)
+library(progressr)
+
+plan(multisession, workers = 8)
+cdfs <- with_progress({
+    p <- progressor(steps = length(pairs))
+    future_walk(pairs, ~{p(); getWalks(.x)}) 
+})
+```
+# Reformat
+
+```{r}
+complete_df <- read_csv(here('data/exp2/model_input/vocab.csv')) %>%
+  left_join(read_csv(here('data/exp2/model_output/cdfs.csv'))) %>%
+  select(Word,wordpair,step,cdf) %>%
+  complete(Word, wordpair, step, fill = list(cdf = 0)) %>%
+  filter(!is.na(step), !is.na(wordpair))
+
+read_csv(here('data/exp2/model_input/vocab.csv')) %>%
+  left_join(complete_df) %>%
+  select(Word,wordpair,step,cdf) %>%
+  write_csv(here('data/exp2/model_output/cdfs_long.csv'))
 ```
