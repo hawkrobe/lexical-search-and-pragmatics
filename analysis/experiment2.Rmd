@@ -19,27 +19,19 @@ library(jsonlite)
 ```{r}
 d.exp2 <- read_csv(here("data/exp2/cleaned.csv"))
 
-likelihoods <- bind_rows(
-  read_csv(here("data/exp2/model_output/speaker_df_cdf_prag.csv")) %>% 
-    rename(budget = cost) %>% mutate(model = 'search+prag'),
-  read_csv(here("data/exp2/model_output/speaker_df_cdf_no_prag.csv")) %>% 
-    rename(budget = cost) %>% mutate(model = 'no_prag'),
-  read_csv(here("data/exp2/model_output/speaker_df_freq_prag.csv")) %>% 
-    mutate(model = 'no_search'),
-) |> 
-  select(model, wordpair, alpha, costweight, correctedClue, Level, budget, prag_speaker_probs, prag_speaker_rank) %>%
+likelihoods <- read_csv(here("data/exp2/model_output/speaker_df.csv")) %>%
+  select(model, wordpair, alpha, costweight, correctedClue, Level, cost_fn, prob) %>%
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(budget, model, alpha, costweight, Level) %>%
-  summarize(rank = mean(prag_speaker_rank, na.rm = T),
-            loglik = sum(log(prag_speaker_probs), na.rm = T)) 
+  group_by(cost_fn, model, alpha, costweight, Level) %>%
+  summarize(loglik = sum(log1p(prob), na.rm = T))
 
 likelihoods %>%
-  group_by(model, Level, budget) %>%
+  group_by(model, Level, cost_fn) %>%
   filter(loglik == max(loglik)) %>%
-  ggplot(aes(x = budget, y = loglik, color = Level)) +
-    geom_line(stat = 'identity', data = . %>% filter(model == 'search+prag')) +
-    geom_hline(aes(yintercept = loglik, color = Level), linetype = 'dashed', data = . %>% filter(model == 'no_search')) +
-    geom_line(aes(yintercept = loglik, color = Level), linetype = 'dotted', data = . %>% filter(model == 'no_prag')) +
+  ggplot(aes(x = as.numeric(cost_fn), y = loglik, color = Level)) +
+    geom_line(stat = 'identity', data = . %>% filter(model == 'pragcdf')) +
+    geom_hline(aes(yintercept = loglik, color = Level), linetype = 'dashed', data = . %>% filter(model == 'pragfreq')) +
+    geom_line(linetype = 'dotted', data = . %>% filter(model == 'no_pragcdf')) +
     geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
     facet_wrap(~ Level) +
     scale_x_log10(limits = c(1, 10000)) +
@@ -55,7 +47,9 @@ ggsave(here('analysis/plots/exp1_modelcomparison.pdf'), units = 'in', height = 3
 ```{r}
 likelihoods %>%
   group_by(model, Level) %>%
-  filter(loglik == max(loglik)) 
+  filter(rank == min(rank))  %>%
+  arrange(Level) %>%
+  xtable()
   
 ```
 
@@ -80,21 +74,25 @@ likelihoods %>%
 ```{r}
 likelihoods %>%
   group_by(Level, model, budget, costweight) %>%
-  mutate(loglik = ifelse(loglik < -6000, -6000, loglik)) %>%
+  mutate(loglik = ifelse(loglik < -5000, -5000, loglik)) %>%
   filter(loglik == max(loglik)) %>%
   ungroup() %>%
   complete(Level, model, budget, costweight, fill = list(loglik = NA)) %>%
   group_by(Level, model, costweight) %>%
   mutate(loglik = ifelse(is.na(loglik), mean(loglik, na.rm = T), loglik)) %>%
-ggplot(aes(x = costweight, y = budget, fill = loglik)) +
-    geom_tile(stat = 'identity', height=.33, width=.33) +
-    facet_grid(model ~ Level) +
+  ggplot(aes(x = costweight, y = budget, fill = loglik)) +
+    geom_tile(stat = 'identity', height=.34, width=.33) +
+    geom_tile(color = 'black', stat = 'identity', height=.34, width=.33, size = 1.1,
+              data = . %>% group_by(Level, model) %>% filter(loglik == max(loglik))) +
+    facet_grid(Level ~ model) +
     scale_x_log10() +
     scale_y_log10() +
-    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    scale_fill_gradient2(midpoint = -4000) +
     theme_few() +
-    labs(x = "search budget") +
+    labs(y = "search budget", "cost weight") +
     theme(aspect.ratio = 1)
+
+ggsave(here("analysis/plots/exp1_heatmap.pdf"), units = 'in', width = 6, height = 5)
 ```
 
 

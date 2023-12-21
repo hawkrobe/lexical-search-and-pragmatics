@@ -21,7 +21,7 @@ library(jsonlite)
 ## Vocab
 
 ```{r}
-vocab <- read_csv(here('data/walk_data/vocab.csv')) 
+vocab <- read_csv(here('data/exp1/model_input/vocab.csv')) 
 
 vocab %>%
   pull(Word) %>%
@@ -338,7 +338,13 @@ ggsave(here(paste0('analysis/plots/cdf-duo.pdf')), units='in', height = 4, width
 Statistics
 
 ```{r}
+# note that this will take a very long time! 
+walks <- map(pairs, getWalks, .progress = T) %>%
+  list_rbind() %>%
+  left_join(clues)
+
 d.spearmancor <- walks %>%
+  left_join()
   group_by(wordpair, step) %>%
   summarize(r = cor(cdf, clueCount, method = 'spearman')) %>%
   left_join(d.levels) 
