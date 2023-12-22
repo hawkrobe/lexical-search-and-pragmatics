@@ -11,14 +11,24 @@ import networkx as nx
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from scipy.special import softmax
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_config
 from tqdm import tqdm
 
-class RSA:
-  def __init__(self, exp_path, inf_type, cost_type) :
+class Selector:
+  def __init__(self, exp_path, params) :
+    # handle parameters
+    self.cost_type = params[0] if len(params) > 0 else 'cdf'
+    self.inf_type = params[1] if len(params) > 1 else 'prag'
+    self.alpha = float(params[2]) if len(params) > 2 else None
+    self.costweight = float(params[3]) if len(params) > 3 else None
+    self.distweight = float(params[4]) if len(params) > 4 else None
+    if self.inf_type == 'additive' :
+      assert(self.distweight is not None)
+    else :
+      assert(self.alpha is not None and self.costweight is not None)
+
+    # read in metadata
     self.exp_path = exp_path
-    self.inf_type = inf_type
-    self.cost_type = cost_type
     self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
     self.targets = pd.read_csv(f"{exp_path}/targets.csv")
     self.cluedata = pd.read_csv(f"{exp_path}/cleaned.csv")
@@ -28,6 +38,7 @@ class RSA:
     with open(f'{exp_path}/boards.json', 'r') as json_file:
       self.boards = json.load(json_file)
 
+    # initialize/cache objects
     self.create_board_combos()
     self.create_cost_fn()
     self.sims = {
@@ -37,22 +48,19 @@ class RSA:
 
   def create_cost_fn(self) :
     print('building cost fn...')
-    self.cost = {}
-    measure_df = pd.read_csv(f"{self.exp_path}/model_output/{self.cost_type}s_long.csv")
 
-    # transform measures to costs -- higher rank means more costly but
-    # lower score is more costly (need to invert)
-    if self.cost_type == 'rank' :
-      measure_df.loc[:,'value'] = np.log1p(measure_df.loc[:,'value'])
-    elif self.cost_type == 'freq':
+    # transform measures to costs
+    measure_df = pd.read_csv(f"{self.exp_path}/model_output/{self.cost_type}s_long.csv")
+    if self.cost_type == 'freq':
       measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
     else :
       measure_df.loc[:,'value'] = -1 * np.log(0.001 + measure_df.loc[:,'value'])
 
+    self.cost = {}
     for measure in measure_df['measure'].unique() :
       subset = measure_df.query("measure == @measure")
       self.cost[measure] = {
-        wordpair: subset.query("wordpair == @wordpair")
+        wordpair: subset.query("wordpair == @wordpair")['value'].to_numpy()
         for wordpair in self.cluedata['wordpair'].unique()
       }
     
@@ -94,49 +102,52 @@ class RSA:
     # the product semantics to be valid
     return ((np.array(f_w1) + 1) /2) * ((np.array(f_w2) + 1)/2)
 
+  def informativity(self, boardname, targetpair_idx) :
+    if self.inf_type == 'RSA' :
+      return np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
+    elif self.inf_type == 'additive' :
+      distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
+      assert(distractors.shape == (189, 12218))
+      return (self.sims[boardname][targetpair_idx].ravel() 
+              - self.distweight * np.sum(distractors, axis=0))
+    elif self.inf_type == 'no_prag' :
+      return self.sims[boardname][targetpair_idx].ravel()
+
   def literal_guesser(self, boardname):
     '''
     literal guesser probability over each wordpair
     '''
     return softmax(self.sims[boardname], axis = 0) # 190 x vocab
 
-  def pragmatic_speaker(self, targetpair, boardname, modelname, alpha, costweight):
+  def pragmatic_speaker(self, targetpair, boardname, cost_fn):
     '''
     softmax likelihood of each possible clue
     '''
 
     targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
-    inf = (
-      np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
-      if self.inf_type == 'prag'
-      else np.log(self.sims[boardname])[targetpair_idx].ravel()
-    )
-    cost = self.cost[modelname][targetpair]['value'].to_numpy().ravel()
-    utility = (1-costweight) * inf - costweight * cost
-    return softmax(alpha * utility)
+    inf = self.informativity(boardname, targetpair_idx)
+    cost = self.cost[cost_fn][targetpair].ravel()
+    utility = (1-self.costweight) * inf - self.costweight * cost
+    return softmax(self.alpha * utility)
 
-  def get_speaker_scores(self, boarddata, probsarray, probsarray_sorted) :
+  def get_speaker_scores(self, boarddata, probsarray) :
     '''
     takes a set of clues and word pairs, and computes the probability and rank of each clue
     inputs:
     (1) boarddata
     (2) probsarray: a candidates array of pragmatic speaker predictions
-    (3) probsarray_sorted: a sorted candidates array of pragmatic speaker predictions
 
     outputs:
     softmax probabilities and ranks for each candidate in cluedata
     '''
     speaker_probs = []
-    speaker_ranks = []
     for index, row in boarddata.iterrows():
         if row["correctedClue"] in list(self.vocab["Word"]):
             clue_index = list(self.vocab["Word"]).index(row["correctedClue"])
             speaker_probs.append(probsarray[clue_index])
-            speaker_ranks.append(np.nonzero(probsarray_sorted==clue_index)[0][0])
         else:
             speaker_probs.append("NA")
-            speaker_ranks.append("NA")
-    return speaker_probs, speaker_ranks
+    return speaker_probs
 
   def get_speaker_df(self, params):
     '''
@@ -149,41 +160,29 @@ class RSA:
     outputs:
     a dataframe with clue ranks & probs for each possible candidate & representation
     '''
-    speakerprobs_dfs = []
-    for index, row in self.targets.iterrows():
-      boardname = row["boardnames"]
-      targetpair = row['wordpair']
-      y = self.pragmatic_speaker(targetpair, boardname, params[0], params[1], params[2])
-      y_sorted = np.argsort(-y)
-      expdata_board = self.cluedata.query("wordpair == @targetpair and boardnames == @boardname").copy()
-      speaker_prob, speaker_rank = self.get_speaker_scores(expdata_board, y, y_sorted)
-      expdata_board.loc[:,"cost"] = params[0]
-      expdata_board.loc[:,"alpha"] = params[1]
-      expdata_board.loc[:,"costweight"] = params[2]
-      expdata_board.loc[:,"model"] = self.inf_type + self.cost_type
-      expdata_board.loc[:,"prag_speaker_probs"] = speaker_prob
-      expdata_board.loc[:,"prag_speaker_rank"] = speaker_rank
-      speakerprobs_dfs.append(expdata_board)
-
-    return pd.concat(speakerprobs_dfs)
+    boards = []
+    for cost_fn in self.cost.keys() :
+      for index, row in self.targets.iterrows() :
+        boardname = row["boardnames"]
+        targetpair = row['wordpair']
+        y = self.pragmatic_speaker(targetpair, boardname, cost_fn)
+        expdata_board = self.cluedata.copy().query("wordpair == @targetpair and boardnames == @boardname")
+        speaker_prob = self.get_speaker_scores(expdata_board, y)
+        expdata_board.loc[:,"cost_fn"] = cost_fn
+        expdata_board.loc[:,"alpha"] = self.alpha
+        expdata_board.loc[:,"costweight"] = self.costweight
+        expdata_board.loc[:,"distweight"] = self.distweight        
+        expdata_board.loc[:,"model"] = self.inf_type + self.cost_type
+        expdata_board.loc[:,"prob"] = speaker_prob
+        boards.append(expdata_board)
+    return pd.concat(boards)
 
 if __name__ == "__main__":
   # cdf / freq
-  cost_type = sys.argv[1] if len(sys.argv) > 1 else 'cdf'
-  inf_type = sys.argv[2] if len(sys.argv) > 2 else 'prag'
   exp_path = '../data/exp2/'
-  rsa = RSA(exp_path, inf_type, cost_type)
-  param_grid = itertools.product(
-    rsa.cost.keys(),
-    [1, 2, 4, 8, 16, 32, 64],
-    [0, 0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1]
-  )
-  out = pd.concat(list(tqdm(
-    Parallel(n_jobs=8, return_as = 'generator')(
-      delayed(rsa.get_speaker_df)(params) for params in param_grid
-    ),
-    total = len(rsa.cost.keys()) * 6 * 9
-  )))
+  selector = Selector(exp_path, sys.argv[1:])
+  out = selector.get_speaker_df(sys.argv[3:])
+  print(sys.argv)
   out.to_csv(
-    f'{exp_path}/model_output/speaker_df_{cost_type}_{inf_type}.csv'
+    f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
   )
