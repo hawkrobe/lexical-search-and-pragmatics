@@ -104,16 +104,15 @@ class Selector:
 
   def informativity(self, boardname, targetpair_idx) :
     if self.inf_type == 'RSA' :
-      relative = np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
-      return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel() 
-              + self.distweight * relative)
+      diagnosticity = np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
     elif self.inf_type == 'additive' :
       distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
       assert(distractors.shape == (189, 12218))
-      return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel() 
-              - self.distweight * np.mean(distractors, axis=0))
+      diagnosticity = -np.max(distractors, axis=0)
     elif self.inf_type == 'no_prag' :
-      return self.sims[boardname][targetpair_idx].ravel()
+      diagnosticity = 0
+    return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel() 
+             + self.distweight * diagnosticity)
 
   def literal_guesser(self, boardname):
     '''
