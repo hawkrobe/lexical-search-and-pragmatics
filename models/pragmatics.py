@@ -104,12 +104,14 @@ class Selector:
 
   def informativity(self, boardname, targetpair_idx) :
     if self.inf_type == 'RSA' :
-      return np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
+      relative = np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
+      return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel() 
+              + self.distweight * relative)
     elif self.inf_type == 'additive' :
       distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
       assert(distractors.shape == (189, 12218))
-      return (self.sims[boardname][targetpair_idx].ravel() 
-              - self.distweight * np.sum(distractors, axis=0))
+      return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel() 
+              - self.distweight * np.mean(distractors, axis=0))
     elif self.inf_type == 'no_prag' :
       return self.sims[boardname][targetpair_idx].ravel()
 
