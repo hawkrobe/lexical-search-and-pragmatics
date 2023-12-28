@@ -102,9 +102,10 @@ class SWOW:
       with open(f'{exp_path}/model_output/{word1}-{word2}-walks.json', 'w', encoding ='utf8') as json_file:
         json.dump(d, json_file, ensure_ascii = False)
 
-  def score(self, group) :
+  def score(self, group, clues_only = True) :
     # look up how often each clue was visited
-    clue_indices = self.get_nodes_by_word(group['correctedClue'].to_numpy())
+    clue_indices = self.get_nodes_by_word(group['correctedClue'].to_numpy()) if clues_only else self.get_nodes_by_word(self.vocab['Word'].to_numpy())
+    print(clue_indices[:5])
     w1 = group['Word1'].to_numpy()[0]
     w2 = group['Word2'].to_numpy()[0]
     target_indices = self.get_nodes_by_word([w1, w2])
@@ -131,19 +132,20 @@ class SWOW:
           
     # aggregate
     scores = defaultdict(list)
-    for key in union_avg.keys() :
-      for i in clue_indices :
+    for i in clue_indices :
+      scores[f'wordpair'] += [group['wordpair'].to_numpy()[0] if i != None else None]
+      for key in union_avg.keys() :
         scores[f'union_{str(key)}'] += [np.mean(union_avg[key][i]) if i != None else None]
         scores[f'intersection_{str(key)}'] += [np.mean(intersect_avg[key][i]) if i != None else None]
         scores[f'w1_{str(key)}'] += [np.mean(w1_avg[key][i]) if i != None else None]
         scores[f'w2_{str(key)}'] += [np.mean(w2_avg[key][i]) if i != None else None]
- 
-    return pd.concat(
-      [group.reset_index(), pd.DataFrame.from_dict(scores)],
-      axis = 1
-    )
+
+    return pd.concat([
+      group.reset_index() if clues_only else self.vocab.reset_index(),
+      pd.DataFrame.from_dict(scores)
+    ], axis = 1)
   
-  def save_scores(self, exp_path, permute = False):
+  def save_scores(self, exp_path, permute = False, clues_only = True):
     '''
     Computes and saves clue scores to scores.csv
     '''
@@ -152,8 +154,8 @@ class SWOW:
     if permute :
       expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
 
-    with Parallel(n_jobs=30) as parallel:
-      scores = parallel(delayed(self.score)(group) for name, group in expdata.groupby('wordpair'))
+    with Parallel(n_jobs=60) as parallel:
+      scores = parallel(delayed(self.score)(group, clues_only) for name, group in expdata.groupby('wordpair'))
 
     # save to file
     pd.concat(scores).to_csv(
@@ -163,7 +165,7 @@ class SWOW:
   def rank(self, group, clues_only = True) :
     # convert words to nodes
     target_nodes = self.get_nodes_by_word([group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0]])
-    clue_nodes = self.get_nodes_by_word(group['correctedClue'].to_numpy()) if clues_only else range(self.vocab_size)
+    clue_nodes = self.get_nodes_by_word(group['correctedClue'].to_numpy()) if clues_only else self.get_nodes_by_word(self.vocab['Word'].to_numpy())
     
     # loop through 10000 pairs of walks to get indices of first appearances
     w1_walks = np.array([x for x in self.rw if x[0] == target_nodes[0]]).tolist()
@@ -191,13 +193,14 @@ class SWOW:
     new_cols[f'w1_index_walk'] = [np.mean([w1.index(clue_node) if clue_node in w1 else len(w1) for w1 in w1_walks_ord ]) for clue_node in clue_nodes]
     new_cols[f'w2_index_walk'] = [np.mean([w2.index(clue_node) if clue_node in w2 else len(w2) for w2 in w2_walks_ord ]) for clue_node in clue_nodes]
     new_cols[f'intersection'] = [np.mean([intersect.index(clue_node) if clue_node in intersect else len(intersect) for intersect in intersections]) for clue_node in clue_nodes]
-    new_cols[f'union'] = [np.mean([union.index(clue_node) if clue_node in union else len(union) for union in unions if clue_node in union]) for clue_node in clue_nodes]
+    new_cols[f'union'] = [np.mean([union.index(clue_node) if clue_node in union else len(union) for union in unions]) for clue_node in clue_nodes]
+    new_cols[f'wordpair'] = [group['wordpair'].to_numpy()[0] for clue_node in clue_nodes]
     return pd.concat([
-      group.reset_index() if clues_only else vocab.reset_index(),
+      group.reset_index() if clues_only else self.vocab.reset_index(),
       pd.DataFrame.from_dict(new_cols)
     ], axis = 1)
     
-  def save_rank_order(self, exp_path, permute = False):
+  def save_ranks(self, exp_path, permute = False, clues_only = True):
     '''
     Tracks of the number of times a word is visited for different budgets,
     across all word pairs’ walks.
@@ -208,8 +211,8 @@ class SWOW:
     if permute :
       expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
 
-    with Parallel(n_jobs=30) as parallel:
-      ranks = parallel(delayed(self.rank)(group) for name, group in expdata.groupby('wordpair'))
+    with Parallel(n_jobs=60) as parallel:
+      ranks = parallel(delayed(self.rank)(group, clues_only) for name, group in expdata.groupby('wordpair'))
 
     pd.concat(ranks).to_csv(
       f'{exp_path}/model_output/ranks{"_permuted" if permute else ""}.csv'
@@ -221,7 +224,5 @@ if __name__ == "__main__":
 
   np.random.seed(1235)
   # swow.save_candidates('../data/exp2')
-  swow.save_scores('../data/exp2/', permute = False)
-  swow.save_scores('../data/exp2/', permute = True)
-  swow.save_rank_order('../data/exp2/', permute = False)
-  swow.save_rank_order('../data/exp2/', permute = True)
+  swow.save_scores('../data/exp2/', permute = False, clues_only = False)
+  swow.save_ranks('../data/exp2/', permute = False, clues_only = False)
