@@ -122,7 +122,7 @@ class Selector:
     '''
     return softmax(self.sims[boardname], axis = 0) # 190 x vocab
 
-  def pragmatic_speaker(self, targetpair, boardname, cost_fn):
+  def pragmatic_speaker(self, targetpair, boardname, cost_fn, listofclues= None):
     '''
     softmax likelihood of each possible clue
     '''
@@ -131,9 +131,13 @@ class Selector:
     inf = self.informativity(boardname, targetpair_idx)
     cost = self.cost[cost_fn][targetpair].ravel()
     utility = (1-self.costweight) * inf - self.costweight * cost
+    if(listofclues is not None):
+        # find indices of listofclues in the vocab
+        listofclues_idx = [list(self.vocab["Word"]).index(clue) for clue in listofclues if clue in list(self.vocab["Word"])]
+        utility = utility[listofclues_idx]
     return softmax(self.alpha * utility)
-
-  def get_speaker_scores(self, boarddata, probsarray) :
+  
+  def get_speaker_scores(self, boarddata, probsarray, listofclues = None) :
     '''
     takes a set of clues and word pairs, and computes the probability and rank of each clue
     inputs:
@@ -146,10 +150,16 @@ class Selector:
     speaker_probs = []
     for index, row in boarddata.iterrows():
         if row["correctedClue"] in list(self.vocab["Word"]):
-            clue_index = list(self.vocab["Word"]).index(row["correctedClue"])
-            speaker_probs.append(probsarray[clue_index])
+            if(listofclues is not None):
+              clue_index = listofclues.index(row["correctedClue"])
+            else:
+              clue_index = list(self.vocab["Word"]).index(row["correctedClue"])
+            if clue_index < len(probsarray):
+              speaker_probs.append(probsarray[clue_index])
+            else:
+              speaker_probs.append("NA")
         else:
-            speaker_probs.append(np.nan)
+            speaker_probs.append("NA")
     return speaker_probs
 
   def get_speaker_df(self):
@@ -169,8 +179,10 @@ class Selector:
         boardname = row["boardnames"]
         targetpair = row['wordpair']
         y = self.pragmatic_speaker(targetpair, boardname, cost_fn)
+        #y = self.pragmatic_speaker(targetpair, boardname, cost_fn,clues)
         expdata_board = self.cluedata.copy().query("wordpair == @targetpair and boardnames == @boardname")
         speaker_prob = self.get_speaker_scores(expdata_board, y)
+        #speaker_prob = self.get_speaker_scores(expdata_board, y, clues)
         expdata_board.loc[:,"cost_fn"] = cost_fn
         expdata_board.loc[:,"alpha"] = self.alpha
         expdata_board.loc[:,"costweight"] = self.costweight
