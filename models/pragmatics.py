@@ -3,6 +3,8 @@ import sys
 import pickle
 import itertools
 import warnings
+import scipy
+
 import scipy.spatial.distance
 
 import pandas as pd
@@ -10,7 +12,7 @@ import numpy as np
 import networkx as nx
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from scipy.special import softmax
+from scipy.special import softmax, expit
 from joblib import Parallel, delayed, parallel_config
 from tqdm import tqdm
 
@@ -18,7 +20,7 @@ class Selector:
   def __init__(self, exp_path, params) :
     # handle parameters
     self.cost_type = params[0] if len(params) > 0 else 'cdf'
-    self.inf_type = params[1] if len(params) > 1 else 'prag'
+    self.inf_type = params[1] if len(params) > 1 else 'additive'
     self.alpha = float(params[2]) if len(params) > 2 else None
     self.costweight = float(params[3]) if len(params) > 3 else None
     self.distweight = float(params[4]) if len(params) > 4 else None
@@ -54,7 +56,7 @@ class Selector:
     if self.cost_type == 'freq':
       measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
     else :
-      measure_df.loc[:,'value'] = -1 * np.log(0.001 + measure_df.loc[:,'value'])
+      measure_df.loc[:,'value'] = -1 * np.log(0.01 + measure_df.loc[:,'value'])
 
     self.cost = {}
     for measure in measure_df['measure'].unique() :
@@ -120,7 +122,7 @@ class Selector:
     '''
     return softmax(self.sims[boardname], axis = 0) # 190 x vocab
 
-  def pragmatic_speaker(self, targetpair, boardname, cost_fn):
+  def pragmatic_speaker(self, targetpair, boardname, cost_fn, listofclues= None):
     '''
     softmax likelihood of each possible clue
     '''
@@ -129,9 +131,13 @@ class Selector:
     inf = self.informativity(boardname, targetpair_idx)
     cost = self.cost[cost_fn][targetpair].ravel()
     utility = (1-self.costweight) * inf - self.costweight * cost
+    if(listofclues is not None):
+        # find indices of listofclues in the vocab
+        listofclues_idx = [list(self.vocab["Word"]).index(clue) for clue in listofclues if clue in list(self.vocab["Word"])]
+        utility = utility[listofclues_idx]
     return softmax(self.alpha * utility)
-
-  def get_speaker_scores(self, boarddata, probsarray) :
+  
+  def get_speaker_scores(self, boarddata, probsarray, listofclues = None) :
     '''
     takes a set of clues and word pairs, and computes the probability and rank of each clue
     inputs:
@@ -144,13 +150,19 @@ class Selector:
     speaker_probs = []
     for index, row in boarddata.iterrows():
         if row["correctedClue"] in list(self.vocab["Word"]):
-            clue_index = list(self.vocab["Word"]).index(row["correctedClue"])
-            speaker_probs.append(probsarray[clue_index])
+            if(listofclues is not None):
+              clue_index = listofclues.index(row["correctedClue"])
+            else:
+              clue_index = list(self.vocab["Word"]).index(row["correctedClue"])
+            if clue_index < len(probsarray):
+              speaker_probs.append(probsarray[clue_index])
+            else:
+              speaker_probs.append("NA")
         else:
             speaker_probs.append("NA")
     return speaker_probs
 
-  def get_speaker_df(self, params):
+  def get_speaker_df(self):
     '''
     returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations
     over a given set of candidates
@@ -167,8 +179,10 @@ class Selector:
         boardname = row["boardnames"]
         targetpair = row['wordpair']
         y = self.pragmatic_speaker(targetpair, boardname, cost_fn)
+        #y = self.pragmatic_speaker(targetpair, boardname, cost_fn,clues)
         expdata_board = self.cluedata.copy().query("wordpair == @targetpair and boardnames == @boardname")
         speaker_prob = self.get_speaker_scores(expdata_board, y)
+        #speaker_prob = self.get_speaker_scores(expdata_board, y, clues)
         expdata_board.loc[:,"cost_fn"] = cost_fn
         expdata_board.loc[:,"alpha"] = self.alpha
         expdata_board.loc[:,"costweight"] = self.costweight
@@ -178,12 +192,26 @@ class Selector:
         boards.append(expdata_board)
     return pd.concat(boards)
 
+  def get_likelihood(self, params) :
+    softplus = lambda x: np.log1p(np.exp(x))
+    self.alpha = softplus(params[0])
+    self.costweight = expit(params[1])
+    self.distweight = 0# expit(params[2])
+    df = self.get_speaker_df()
+    lik = -np.sum(np.log(np.asarray(df['prob'])[~np.isnan(df['prob'])]))
+    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', lik)
+    return lik
+
+  def optimize(self) :
+    return scipy.optimize.minimize(self.get_likelihood, [8, 0.1]) 
+  
 if __name__ == "__main__":
   # cdf / freq
   exp_path = '../data/exp1/'
   selector = Selector(exp_path, sys.argv[1:])
-  out = selector.get_speaker_df(sys.argv[3:])
-  print(sys.argv)
+  # selector.optimize()
+  
+  out = selector.get_speaker_df()
   out.to_csv(
     f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
   )
