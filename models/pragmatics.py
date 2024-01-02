@@ -180,7 +180,7 @@ class Selector:
 
 if __name__ == "__main__":
   # cdf / freq
-  exp_path = '../data/exp2/'
+  exp_path = '../data/exp1/'
   selector = Selector(exp_path, sys.argv[1:])
   out = selector.get_speaker_df(sys.argv[3:])
   print(sys.argv)

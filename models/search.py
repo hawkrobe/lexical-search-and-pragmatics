@@ -94,7 +94,7 @@ class SWOW:
     write out walks in order of words visited
     '''
     for word1, word2 in zip(self.target_df['Word1'], self.target_df['Word2']) :
-      print(word1,word2)
+      print(word1, word2)
       w1_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word1])])
       w2_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word2])])
       d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(1000)}
@@ -217,11 +217,12 @@ class SWOW:
 
 
 if __name__ == "__main__":
-  swow = SWOW('../data/exp2')
-
   np.random.seed(1235)
-  # swow.save_candidates('../data/exp2')
-  swow.save_scores('../data/exp2/', permute = False)
-  swow.save_scores('../data/exp2/', permute = True)
-  swow.save_rank_order('../data/exp2/', permute = False)
-  swow.save_rank_order('../data/exp2/', permute = True)
+  swow_exp1 = SWOW('../data/exp1')
+  swow_exp1.save_candidates('../data/exp1')
+
+  swow_exp2 = SWOW('../data/exp2')
+  swow_exp2.save_scores('../data/exp2/', permute = False)
+  swow_exp2.save_scores('../data/exp2/', permute = True)
+  swow_exp2.save_rank_order('../data/exp2/', permute = False)
+  swow_exp2.save_rank_order('../data/exp2/', permute = True)
