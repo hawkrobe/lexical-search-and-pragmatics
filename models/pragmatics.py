@@ -4,6 +4,7 @@ import pickle
 import itertools
 import warnings
 import scipy
+from functools import lru_cache
 
 import scipy.spatial.distance
 
@@ -12,7 +13,8 @@ import numpy as np
 import networkx as nx
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from scipy.special import softmax, expit
+from scipy.special import softmax, expit, logit
+from scipy.stats import norm
 from joblib import Parallel, delayed, parallel_config
 from tqdm import tqdm
 
@@ -56,7 +58,7 @@ class Selector:
     if self.cost_type == 'freq':
       measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
     else :
-      measure_df.loc[:,'value'] = -1 * np.log(0.01 + measure_df.loc[:,'value'])
+      measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
 
     self.cost = {}
     for measure in measure_df['measure'].unique() :
@@ -104,65 +106,36 @@ class Selector:
     # the product semantics to be valid
     return ((np.array(f_w1) + 1) /2) * ((np.array(f_w2) + 1)/2)
 
-  def informativity(self, boardname, targetpair_idx) :
-    if self.inf_type == 'RSA' :
-      diagnosticity = np.log(self.literal_guesser(boardname))[targetpair_idx].ravel()
-    elif self.inf_type == 'additive' :
-      distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
-      assert(distractors.shape == (189, 12218))
-      diagnosticity = -np.max(distractors, axis=0)
-    elif self.inf_type == 'no_prag' :
-      diagnosticity = 0
-    return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel() 
-             + self.distweight * diagnosticity)
-
+  @lru_cache(maxsize=None)
   def literal_guesser(self, boardname):
     '''
     literal guesser probability over each wordpair
     '''
     return softmax(self.sims[boardname], axis = 0) # 190 x vocab
 
-  def pragmatic_speaker(self, targetpair, boardname, cost_fn, listofclues= None):
+  def informativity(self, boardname, targetpair_idx) :
+    if self.inf_type == 'RSA' :
+      diagnosticity = self.literal_guesser(boardname)[targetpair_idx].ravel()
+    elif self.inf_type == 'additive' :
+      distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
+      assert(distractors.shape == (189, 12218))
+      diagnosticity = -np.max(distractors, axis=0)
+    elif self.inf_type == 'no_prag' :
+      diagnosticity = 0
+    return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel()
+             + self.distweight * diagnosticity)
+
+  def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''
     softmax likelihood of each possible clue
     '''
-
     targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
     inf = self.informativity(boardname, targetpair_idx)
     cost = self.cost[cost_fn][targetpair].ravel()
     utility = (1-self.costweight) * inf - self.costweight * cost
-    if(listofclues is not None):
-        # find indices of listofclues in the vocab
-        listofclues_idx = [list(self.vocab["Word"]).index(clue) for clue in listofclues if clue in list(self.vocab["Word"])]
-        utility = utility[listofclues_idx]
-    return softmax(self.alpha * utility)
-  
-  def get_speaker_scores(self, boarddata, probsarray, listofclues = None) :
-    '''
-    takes a set of clues and word pairs, and computes the probability and rank of each clue
-    inputs:
-    (1) boarddata
-    (2) probsarray: a candidates array of pragmatic speaker predictions
+    return softmax(self.alpha * utility[clueset])
 
-    outputs:
-    softmax probabilities and ranks for each candidate in cluedata
-    '''
-    speaker_probs = []
-    for index, row in boarddata.iterrows():
-        if row["correctedClue"] in list(self.vocab["Word"]):
-            if(listofclues is not None):
-              clue_index = listofclues.index(row["correctedClue"])
-            else:
-              clue_index = list(self.vocab["Word"]).index(row["correctedClue"])
-            if clue_index < len(probsarray):
-              speaker_probs.append(probsarray[clue_index])
-            else:
-              speaker_probs.append("NA")
-        else:
-            speaker_probs.append("NA")
-    return speaker_probs
-
-  def get_speaker_df(self):
+  def get_speaker_df(self, clues_only = False):
     '''
     returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations
     over a given set of candidates
@@ -178,38 +151,72 @@ class Selector:
       for index, row in self.targets.iterrows() :
         boardname = row["boardnames"]
         targetpair = row['wordpair']
-        y = self.pragmatic_speaker(targetpair, boardname, cost_fn)
-        #y = self.pragmatic_speaker(targetpair, boardname, cost_fn,clues)
-        expdata_board = self.cluedata.copy().query("wordpair == @targetpair and boardnames == @boardname")
-        speaker_prob = self.get_speaker_scores(expdata_board, y)
-        #speaker_prob = self.get_speaker_scores(expdata_board, y, clues)
-        expdata_board.loc[:,"cost_fn"] = cost_fn
-        expdata_board.loc[:,"alpha"] = self.alpha
-        expdata_board.loc[:,"costweight"] = self.costweight
-        expdata_board.loc[:,"distweight"] = self.distweight        
-        expdata_board.loc[:,"model"] = self.inf_type + self.cost_type
-        expdata_board.loc[:,"prob"] = speaker_prob
-        boards.append(expdata_board)
+        boarddata = self.cluedata.copy().query("wordpair == @targetpair and boardnames == @boardname")
+        vocab = list(self.vocab["Word"])
+        clue_indices = [vocab.index(word) for word in boarddata['correctedClue'] if word in vocab] if clues_only else range(len(vocab))
+        clueset = self.vocab["Word"][clue_indices]
+        y = self.pragmatic_speaker(targetpair, boardname, cost_fn, clue_indices)
+        speaker_probs = [
+          y[list(clueset).index(row["correctedClue"])]
+          if row["correctedClue"] in vocab else 'NA'
+          for i, row in boarddata.iterrows()
+        ]
+        boarddata.loc[:,"cost_fn"] = cost_fn
+        boarddata.loc[:,"alpha"] = self.alpha
+        boarddata.loc[:,"costweight"] = self.costweight
+        boarddata.loc[:,"distweight"] = self.distweight
+        boarddata.loc[:,"model"] = self.inf_type + self.cost_type
+        boarddata.loc[:,"prob"] = speaker_probs
+        boards.append(boarddata)
     return pd.concat(boards)
 
   def get_likelihood(self, params) :
     softplus = lambda x: np.log1p(np.exp(x))
     self.alpha = softplus(params[0])
-    self.costweight = expit(params[1])
-    self.distweight = 0# expit(params[2])
-    df = self.get_speaker_df()
-    lik = -np.sum(np.log(np.asarray(df['prob'])[~np.isnan(df['prob'])]))
-    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', lik)
-    return lik
+    self.costweight = 0#expit(params[1])
+    self.distweight = expit(params[1])
+    df = self.get_speaker_df(clues_only = True)
+    if self.exp_path == '../data/exp3/' :
+      combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
+      combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
+      print(combo)
+      mus = np.asarray(combo['prob_numeric'])[~np.isnan(combo['prob_numeric'])]
+      vals = np.asarray(combo['response'])[~np.isnan(combo['prob_numeric'])]
+      likelihood = -np.sum(norm.logpdf(vals, loc=mus, scale=0.1))
+    else :
+      likelihood = -np.sum(np.log(np.asarray(df['prob'])[~np.isnan(df['prob'])]))
+    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', likelihood)
+    return likelihood
 
-  def optimize(self) :
-    return scipy.optimize.minimize(self.get_likelihood, [8, 0.1]) 
+  def get_spearman(self, params) :
+    softplus = lambda x: np.log1p(np.exp(x))
+    self.alpha = 1 #softplus(params[0])
+    self.costweight = 0 # expit(params[1])
+    self.distweight = expit(params[0])
+    df = self.get_speaker_df(clues_only=True)
+    combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
+    combo_sub = combo.copy()[['wordpair', 'correctedClue', 'cost_fn', 'prob', 'z_rating']]
+    combo_sub.loc[:, 'prob_numeric'] = pd.to_numeric(combo_sub['prob'], errors = 'coerce')
+    corr = (combo_sub
+            .groupby(['wordpair', 'cost_fn'])
+            .apply(lambda d: d['prob_numeric'].corr(d['z_rating'], method='spearman'))
+            .groupby('wordpair').max().mean())
+    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', corr)
+    return -corr
+
+  def optimize(self, fn) :
+    self.human_df = pd.read_csv(f"{self.exp_path}/model_input/human-ratings.csv")
+    if fn == 'spearman' :
+      # need to use a global optimization method
+      return scipy.optimize.basinhopping(selector.get_spearman, [-2, 0, 0])
+    else :
+      return scipy.optimize.basinhopping(selector.get_likelihood, [5, 0.1, 0.1])
   
 if __name__ == "__main__":
   # cdf / freq
-  exp_path = '../data/exp1/'
+  exp_path = '../data/exp3/'
   selector = Selector(exp_path, sys.argv[1:])
-  # selector.optimize()
+  selector.optimize('likelihood')
   
   out = selector.get_speaker_df()
   out.to_csv(
