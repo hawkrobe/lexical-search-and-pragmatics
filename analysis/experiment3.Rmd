@@ -19,6 +19,7 @@ library(lme4)
 library(broom.mixed)
 setwd(here::here())
 getwd()
+library(ggrepel)
 ```
 
 # behavioral data 
@@ -26,7 +27,7 @@ getwd()
 ## import listener data (for Level recoding)
 
 ```{r}
-listener = read_csv("data/exp3/listener.csv") %>% 
+listener = read_csv("../data/exp3/listener.csv") %>% 
   filter(typeoftrial %in% c("guess1", "guess2") & 
            accessibility %in% c("high", "low")) %>% 
   # excluding second attempt of 61440, identified by a different timestamp 
@@ -125,7 +126,7 @@ clue_accuracy = data_wide %>% group_by(wordpair, clue) %>%
 ## import speaker data
 
 ```{r}
-raw_data = read_csv("data/exp3/raw.csv") %>% 
+raw_data = read_csv("../data/exp3/raw.csv") %>% 
   group_by(sona_id) %>%
   mutate(min_recorded_at = min(recorded_at)) %>%
   ungroup() %>%
@@ -199,98 +200,50 @@ ggsave(here('analysis/plots/exp3_rating_time.pdf'), units = 'in', width = 4, hei
 
 ```
 
-# clue properties
-
-
-## accessibility
+## speaker-listener pattern
 
 ```{r}
 
-clues = read_csv("data/exp3/cleaned.csv") 
+original_ratings = final_data %>%
+  group_by(wordpair, clue) %>%
+  # average all the rating scores, higher sum total means that clue was most preferred
+  # across all participants
+  summarise_at(vars(response), mean)%>%
+  ungroup()%>%
+  group_by(wordpair) %>%
+  mutate(z_rating = as.numeric(scale(response)))
 
-cdfs = read_csv("data/exp3/model_output/cdfs_long.csv") %>%
-  rename(correctedClue = "Word") %>%
-  right_join(clues)
+speaker_listener = clue_accuracy %>% left_join(original_ratings) %>%
+  left_join(wordpair_accuracy %>% select(-correct))%>%
+  mutate(x = paste0(wordpair, ":", clue))
 
+label_data= speaker_listener %>% 
+  filter(wordpair %in% c("lion-tiger", "weird-trauma", "war-quiet"))
 
+speaker_listener %>%
+  ggplot(aes(x = response, y = correct, group = Level, color = Level)) +
+  geom_point(alpha = 0.15)+
+  geom_smooth(method = "lm")+
+  geom_text_repel(
+    data = label_data,
+    aes(label = clue), box.padding = 0.15, point.padding = 0.15, 
+    max.overlaps = Inf, segment.color = NA, fontface = "bold") +
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(limits = c(1,5))+
+  theme_few() +
+  scale_color_manual(values = c('#60BD68', '#BAB504', '#CC253D'))+
+    labs(x = "speaker ratings (1-5)", y = "listener accuracy") +
+    theme(aspect.ratio = 1)
 
-plot_data = cdfs %>% select(-Level) %>% mutate(wordpair = tolower(wordpair)) %>%
-  left_join(wordpair_accuracy %>% select(wordpair, Level))%>%
-  group_by(correctedClue,measure) %>%
-  summarise(avg_cdf = mean(value, na.rm = TRUE))
+behavioral_model = lm(data = speaker_listener, correct ~ response*Level)
+summary(behavioral_model)
 
-low_values <- plot_data %>%
-  filter(avg_cdf < 0.25 & measure > 8000) %>%
-  filter(correctedClue %in% c("dopamine", "effect"))
+ggsave('plots/exp3_speaker_listener.pdf', units = 'in', width = 5, height = 5)
+
   
-
-high_values <- plot_data %>%
-  filter(avg_cdf > 0.9 & measure < 130)%>%
-  filter(correctedClue %in% c("flame", "cat"))
-
-a_plot =  plot_data %>%
-  ggplot(aes(x=measure, y = avg_cdf)) +
-  geom_line(alpha = 0.15, aes(color = correctedClue))+
-  scale_x_log10(limits = c(1, 10000)) +
-  geom_text(data = high_values,
-            aes(label = correctedClue, x = measure, y = avg_cdf),
-            vjust = 1, hjust = 1, size = 3, color = "black") +
-  geom_text(data = low_values,
-            aes(label = correctedClue, x = measure, y = avg_cdf),
-            vjust = 1, hjust = 1, size = 3, color = "black")+
-    theme_few() +
-    labs(x = "search budget", y = "cumulative probability of encountering clue", title = "accessibility") +
-    theme(aspect.ratio = 1, legend.position = "none")
-
-
-
 ```
-## informativity
-```{r}
-# informativity_paths = paste0(getwd(),"/data/exp3/model_output/informativity/")
-# 
-# informativity_dfs <- map_dfr(list.files(path = informativity_paths, pattern = "\\.csv$", full.names = TRUE), 
-#                       ~read_csv(.x) %>% mutate(cost_fn = as.numeric(cost_fn))) 
-# 
-# informativity_dfs_main = informativity_dfs %>%
-#   mutate( informativity= sub("cdf|freq", "", model),
-#          cost_source = sub(".*(cdf|freq)", "\\1", model)) %>%
-#   select(-c(cost_fn, costweight, alpha, model, cost_source)) %>%
-#   distinct() %>%
-#   filter(!is.na(prob)) %>%
-#   filter(informativity != "no_prag") %>%
-#   select(-Level) %>% mutate(wordpair = tolower(wordpair)) %>%
-#   left_join(wordpair_accuracy %>% select(wordpair, Level))
-# 
-# 
-# d_plot = informativity_dfs_main %>%
-#   #filter(informativity == "additive" & distweight==0.04) %>%
-#   filter(informativity == "RSA") %>% 
-#   ggplot(aes(x = prob)) +
-#   geom_histogram(binwidth = 0.01, fill = "aquamarine4", color = "darkgray")+
-#   theme_few() +
-#     labs(x = "clue informativity score", y = "density", title = "informativity") +
-#     theme(aspect.ratio = 1, legend.position = "none")
-# 
-# gridExtra::grid.arrange(a_plot, d_plot, nrow = 1)
-# 
-# ggsave(here('analysis/plots/exp3_clue_metrics.pdf'), plot =gridExtra::grid.arrange(a_plot, d_plot, nrow = 1),
-#        units = 'in', height = 4, width = 6)
-# 
-# ## was informativity related to listener accuracy?
-# 
-# listener_accuracy = informativity_dfs_main %>%
-#   #filter(informativity == "additive" & distweight==0.04) %>% 
-#   filter(informativity == "RSA") %>% 
-#   select(wordpair,Clue1, correctedClue, prob) %>%
-#   right_join(data_wide %>% rename(Clue1 = "clue"))
-# 
-# acc_model = glmer(data = listener_accuracy, accuracy ~ prob + (1|sona_id), family = binomial,
-#                   control = glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)))
-# summary(acc_model)
-# car::Anova(acc_model)
 
-```
+
 
 
 # model comparisons
@@ -435,4 +388,94 @@ e1e3_match = boards %>%
 
 ```
 
+
+## accessibility
+
+```{r}
+
+clues = read_csv("data/exp3/cleaned.csv") 
+
+cdfs = read_csv("data/exp3/model_output/cdfs_long.csv") %>%
+  rename(correctedClue = "Word") %>%
+  right_join(clues)
+
+
+
+plot_data = cdfs %>% select(-Level) %>% mutate(wordpair = tolower(wordpair)) %>%
+  left_join(wordpair_accuracy %>% select(wordpair, Level))%>%
+  group_by(correctedClue,measure) %>%
+  summarise(avg_cdf = mean(value, na.rm = TRUE))
+
+low_values <- plot_data %>%
+  filter(avg_cdf < 0.25 & measure > 8000) %>%
+  filter(correctedClue %in% c("dopamine", "effect"))
+  
+
+high_values <- plot_data %>%
+  filter(avg_cdf > 0.9 & measure < 130)%>%
+  filter(correctedClue %in% c("flame", "cat"))
+
+a_plot =  plot_data %>%
+  ggplot(aes(x=measure, y = avg_cdf)) +
+  geom_line(alpha = 0.15, aes(color = correctedClue))+
+  scale_x_log10(limits = c(1, 10000)) +
+  geom_text(data = high_values,
+            aes(label = correctedClue, x = measure, y = avg_cdf),
+            vjust = 1, hjust = 1, size = 3, color = "black") +
+  geom_text(data = low_values,
+            aes(label = correctedClue, x = measure, y = avg_cdf),
+            vjust = 1, hjust = 1, size = 3, color = "black")+
+    theme_few() +
+    labs(x = "search budget", y = "cumulative probability of encountering clue", title = "accessibility") +
+    theme(aspect.ratio = 1, legend.position = "none")
+
+
+
+```
+## informativity
+```{r}
+# informativity_paths = paste0(getwd(),"/data/exp3/model_output/informativity/")
+# 
+# informativity_dfs <- map_dfr(list.files(path = informativity_paths, pattern = "\\.csv$", full.names = TRUE), 
+#                       ~read_csv(.x) %>% mutate(cost_fn = as.numeric(cost_fn))) 
+# 
+# informativity_dfs_main = informativity_dfs %>%
+#   mutate( informativity= sub("cdf|freq", "", model),
+#          cost_source = sub(".*(cdf|freq)", "\\1", model)) %>%
+#   select(-c(cost_fn, costweight, alpha, model, cost_source)) %>%
+#   distinct() %>%
+#   filter(!is.na(prob)) %>%
+#   filter(informativity != "no_prag") %>%
+#   select(-Level) %>% mutate(wordpair = tolower(wordpair)) %>%
+#   left_join(wordpair_accuracy %>% select(wordpair, Level))
+# 
+# 
+# d_plot = informativity_dfs_main %>%
+#   #filter(informativity == "additive" & distweight==0.04) %>%
+#   filter(informativity == "RSA") %>% 
+#   ggplot(aes(x = prob)) +
+#   geom_histogram(binwidth = 0.01, fill = "aquamarine4", color = "darkgray")+
+#   theme_few() +
+#     labs(x = "clue informativity score", y = "density", title = "informativity") +
+#     theme(aspect.ratio = 1, legend.position = "none")
+# 
+# gridExtra::grid.arrange(a_plot, d_plot, nrow = 1)
+# 
+# ggsave(here('analysis/plots/exp3_clue_metrics.pdf'), plot =gridExtra::grid.arrange(a_plot, d_plot, nrow = 1),
+#        units = 'in', height = 4, width = 6)
+# 
+# ## was informativity related to listener accuracy?
+# 
+# listener_accuracy = informativity_dfs_main %>%
+#   #filter(informativity == "additive" & distweight==0.04) %>% 
+#   filter(informativity == "RSA") %>% 
+#   select(wordpair,Clue1, correctedClue, prob) %>%
+#   right_join(data_wide %>% rename(Clue1 = "clue"))
+# 
+# acc_model = glmer(data = listener_accuracy, accuracy ~ prob + (1|sona_id), family = binomial,
+#                   control = glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)))
+# summary(acc_model)
+# car::Anova(acc_model)
+
+```
 
