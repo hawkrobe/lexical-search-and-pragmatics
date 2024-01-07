@@ -21,7 +21,7 @@ library(jsonlite)
 ## Vocab
 
 ```{r}
-vocab <- read_csv(here('data/exp1/model_input/vocab.csv')) 
+vocab <- read_csv(here('data/exp2/model_input/vocab.csv')) 
 
 vocab %>%
   pull(Word) %>%
@@ -32,7 +32,7 @@ vocab %>%
 ## Recode Levels
 
 ```{r}
-d.raw.oldlevels <- read_csv(here("data/exp1/raw.csv")) %>%
+d.raw.oldlevels <- read_csv(here("data/exp2/raw.csv")) %>%
   mutate(correct = str_detect(wordpair, fixed(tolower(GUESS_1_FINAL))) 
                    & str_detect(wordpair, fixed(tolower(GUESS_2_FINAL)))) %>%
   rowwise() %>%
@@ -75,7 +75,7 @@ inclusions <- d.raw %>%
   filter(n > 20) %>%
   pull(clueGiverID)
 
-d <- read_csv(here("data/exp1/cleaned.csv")) %>%
+d <- read_csv(here("data/exp2/cleaned.csv")) %>%
   filter(clueGiverID %in% inclusions) %>%
   select(-Level) %>%
   left_join(d.newlevels %>% select(wordpair, level)) %>%
@@ -114,6 +114,7 @@ d %>%
     facet_wrap(~ fct_reorder(clueGiverID, avg_num_clues)) +
     theme(aspect.ratio = 1/4)
 ```
+
 # 2. Behavioral results
 
 ## 2.1 Manipulation check
@@ -235,7 +236,7 @@ d.order %>%
     theme(aspect.ratio = 2, legend.position = 'none') +
     ylim(0,1)
 
-ggsave(here('analysis/plots/exp1_order_difficulty.pdf'), 
+ggsave(here('analysis/plots/exp2_order_difficulty.pdf'), 
        units = 'in', width = 4.5, height = 3)
 ```
 
@@ -292,8 +293,8 @@ d %>% filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueF
 
 ```{r}
 pairs = d %>% pull(wordpair) %>% unique()
-clues <- read_csv(here('data/exp1/cleaned.csv')) %>%
-  group_by(wordpair, correctedClue) %>%
+clues <- read_csv(here('data/exp2/cleaned.csv')) %>%
+  group_by(wordpair, seqOrder, correctedClue) %>%
   tally(name = 'clueCount') 
 
 getWalks <- function(pair) {
@@ -340,33 +341,39 @@ Statistics
 ```{r}
 # note that this will take a very long time! 
 walks <- map(pairs, getWalks, .progress = T) %>%
-  list_rbind() %>%
-  left_join(clues)
+  list_rbind() 
 
 d.spearmancor <- walks %>%
-  left_join()
-  group_by(wordpair, step) %>%
+  left_join(clues) %>%
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+  group_by(wordpair, seqOrder, step) %>%
   summarize(r = cor(cdf, clueCount, method = 'spearman')) %>%
   left_join(d.levels) 
 
-d.spearmancor %>%
+d.spearmancor.toplot <- d.spearmancor %>%
   ungroup() %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
-  filter(step > 1) %>%
-  group_by(step, level) %>%
-  summarize(r = mean(r),
-            ci_lower = mean(r) - 2*sd(r)/sqrt(length(r)),
-            ci_upper= mean(r) + 2*sd(r)/sqrt(length(r))) %>%
-  ggplot(aes(x = step, y = r, color = level)) +
-    geom_line(aes(group = wordpair), alpha = 0.1, data = d.spearmancor) +
+  group_by(step, seqOrder, level) %>%
+  summarize(ci_lower = mean(r) - 2*sd(r)/sqrt(length(r)),
+            ci_upper= mean(r) + 2*sd(r)/sqrt(length(r)),
+            r = mean(r)) 
+
+d.spearmancor.toplot %>%
+  ungroup() %>%
+  mutate(seqOrder = fct_relevel(seqOrder, 'clueOrder2', 'clueOrder1', 'clueOrder3', 'clueFinal')) %>%
+  ggplot(aes(x = step, y = r, alpha = seqOrder, color = level)) +
+    # geom_line(aes(group = wordpair), alpha = 0.1, 
+    #           data = d.spearmancor  %>% filter(step %in% 2**seq(1,13))) +
     geom_line() +
     theme_few() +
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
     facet_grid(~ level)+
+    scale_alpha_manual(values = c(1, .2, .4, .8)) +
     labs(y = 'spearman correlation') +
-    scale_x_log10()
+    scale_x_log10() +
+    theme(aspect.ratio = 1)
 
-ggsave(here('analysis/plots/exp1-spearman.pdf'), units = 'in', width = 8, height = 4)
+ggsave(here('analysis/plots/exp2-spearman-broken-out.pdf'), units = 'in', width = 8, height = 4)
 ```
 
 ```{r}
@@ -375,36 +382,52 @@ d.spearmancor %>% group_by(step, level) %>% summarize(r = mean(r)) %>% group_by(
 
 ## Examine how far you have to go to find clue
 
+Find best alpha overall
+
 ```{r}
-bind_rows(
-  read_csv(here("data/exp1/model_output/ranks.csv"))  %>% mutate(src = 'empirical'),
-  read_csv(here("data/exp1/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
-) %>%
-  left_join(read_csv(here("data/exp1/model_output/freq_scores.csv")) %>% mutate(src = 'empirical'), 
-            by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>% 
-  left_join(read_csv(here("data/exp1/model_output/midpoint_scores.csv")) %>% mutate(src = 'empirical'), 
-            by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>%
-  filter(correctedClue %in% (vocab %>% pull(Word) )) %>%
+df.mixture <- read_csv(here("data/exp2/model_output/mixture_scores.csv")) %>% 
   select(-Level) %>%
   left_join(d.levels) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+  group_by(level, seqOrder, alpha) %>%
+  summarize(mix = mean(mixture_index, na.rm=T))  %>%
+  group_by(level, seqOrder) %>%
+  filter(mix == min(mix))
+```
+
+
+```{r}
+bind_rows(
+  read_csv(here("data/exp2/model_output/ranks.csv"))  %>% mutate(src = 'empirical'),
+  read_csv(here("data/exp2/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
+) %>%
+  left_join(read_csv(here("data/exp2/model_output/freq_scores.csv")) %>% mutate(src = 'empirical'), 
+            by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>% 
+  left_join(read_csv(here("data/exp2/model_output/mixture_scores.csv")) %>% 
+              mutate(src = 'empirical')  %>% filter(alpha == 1.0), 
+            by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>%
+  filter(correctedClue %in% (vocab %>% pull(Word))) %>%
+  select(-Level) %>%
+  left_join(d.levels) %>%
+  mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue) %>%
   summarize(intersection = mean(intersection), 
             union = mean(union), 
             single = mean(c(w1_index_walk, w2_index_walk)),
             freq = mean(freq_index),
-            mid = mean(mid_index)) %>% 
-  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+            mix = mean(mixture_index)) %>% 
   pivot_longer(names_to = 'measure', values_to = 'value', 
-               cols = c(union, intersection, single, mid, freq)) %>% 
+               cols = c(union, intersection, single, mix, freq)) %>% 
   ungroup() %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
-  mutate(measure = fct_relevel(measure, 'freq', 'mid', 'single','union', 'intersection')) %>%
+  mutate(measure = fct_relevel(measure, 'freq', 'mix', 'single','union', 'intersection')) %>%
   group_by(measure, seqOrder, src, level) %>%
   filter(!is.na(value)) %>%
   tidyboot_mean(value, nboot=10, na.rm = T) %>%
   ggplot(aes(x = seqOrder, y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
-    geom_line() +
+    geom_line(aes(alpha =)) +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
     facet_grid( ~ measure) +
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
@@ -414,31 +437,31 @@ bind_rows(
     labs(x = '', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
-ggsave("../analysis/plots/exp1_ranks.pdf", width = 6, height = 4, units = 'in')
+ggsave("../analysis/plots/exp2_ranks.pdf", width = 6, height = 4, units = 'in')
 ```
 
 ## Examine mixture scores
 
 ```{r}
-
-read_csv(here("data/exp1/model_output/mixture_scores.csv")) %>% 
+read_csv(here("data/exp2/model_output/mixture_scores.csv")) %>% 
   mutate(src = 'empirical')%>%
   select(-Level) %>%
   left_join(d.levels) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
   group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue, alpha) %>%
   summarize(mix = mean(mixture_index)) %>% 
+  summarize(value = min(value, na.rm = T))
   filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   pivot_longer(names_to = 'measure', values_to = 'value', 
                cols = c(mix)) %>% 
   ungroup() %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(measure, alpha, seqOrder, src, level) %>%
+  group_by(measure, seqOrder, src, level) %>%
   tidyboot_mean(value, nboot=10, na.rm = T) %>%
-  ggplot(aes(x = alpha, y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
+  ggplot(aes(x = seqOrder, alpha = alpha, y = empirical_stat, color = level, linetype = src, group = interaction(src, alpha, level))) +
     geom_line() +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    facet_grid( ~ seqOrder) +
+    #facet_grid( ~ level) +
     scale_color_few() +
     #scale_x_discrete(guide = guide_axis(angle = 90)) +
     theme_few() +
@@ -446,15 +469,15 @@ read_csv(here("data/exp1/model_output/mixture_scores.csv")) %>%
     labs(x = 'alpha', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
-ggsave("../analysis/plots/exp1_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
+ggsave("../analysis/plots/exp2_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
 ```
 
 ## Examine walk scores
 
 ```{r}
 d.scores <- bind_rows(
-  read_csv(here("data/exp1/model_output/scores.csv")) %>% mutate(src = 'empirical'),
-  read_csv(here("data/exp1/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
+  read_csv(here("data/exp2/model_output/scores.csv")) %>% mutate(src = 'empirical'),
+  read_csv(here("data/exp2/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
   filter(seqOrder %in% c('clueFinal', 'clueOption1', 'clueOption2', 'clueOption3')) %>%
   gather(budget, value, union_2:w2_8192) %>%
@@ -481,5 +504,5 @@ d.scores %>%
     labs(x = 'budget', y = 'P(visit)') +
     theme(aspect.ratio = 2)
 
-ggsave("../analysis/plots/exp1_scores.pdf", width = 6, height = 4, units = 'in')
+ggsave("../analysis/plots/exp2_scores.pdf", width = 6, height = 4, units = 'in')
 ```
