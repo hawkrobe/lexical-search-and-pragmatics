@@ -17,9 +17,9 @@ library(jsonlite)
 # 1. speaker selections
 
 ```{r}
-d.exp2 <- read_csv(here("data/exp2/cleaned.csv"))
+d.exp1 <- read_csv(here("data/exp1/cleaned.csv"))
 
-likelihoods <- read_csv(here("data/exp2/model_output/speaker_df.csv")) %>%
+likelihoods <- read_csv(here("data/exp1/model_output/speaker_df.csv")) %>%
   select(model, wordpair, alpha, costweight, distweight, correctedClue, Level, cost_fn, prob) %>%
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) 
 ```
@@ -45,14 +45,6 @@ likelihoods %>%
 ggsave(here('analysis/plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width = 7)
 ```
 
-```{r}
-likelihoods %>%
-  group_by(cost_fn, model, alpha, distweight, costweight, Level) %>%
-  summarize(loglik = sum(log(prob), na.rm = T)) %>%
-  group_by(model) %>%
-  filter(loglik == max(loglik)) %>% arrange(loglik)
-```
-
 Broken out by difficulty
 
 ```{r}
@@ -70,21 +62,26 @@ likelihoods %>%
 
 
 ```{r}
-likelihoods %>%
+d.toplot <- likelihoods %>%
   filter(costweight %in% c(0, .01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1)) %>%
   group_by(cost_fn, model, alpha, distweight, costweight, Level) %>%
   summarize(loglik = sum(log(prob), na.rm = T)) %>%
   group_by(Level, model, costweight) %>%
-  filter(loglik == max(loglik)) %>%
-  ggplot(aes(x = costweight, y = loglik, color = model)) +
+  filter(loglik == max(loglik)) 
+
+d.toplot %>%
+  ggplot(aes(x = costweight, y = loglik, linetype = model, color = Level)) +
     geom_line() +
-    facet_grid( ~ Level) +
+    facet_grid( ~ Level, scales = 'free') +
     scale_x_log10() +
     geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    scale_linetype_manual(values = c('solid', 'dashed', 'dotted')) +
     theme_few() +
     labs(x = "cost weight") +
-    theme(aspect.ratio = 1)
+    theme(aspect.ratio = 1, legend.position = 'top')
+
+ggsave(here('analysis/plots/exp1_costscale.pdf'), units = 'in', height = 3, width = 7)
 ```
 
 
@@ -121,10 +118,10 @@ ggsave(here("analysis/plots/exp1_heatmap.pdf"), units = 'in', width = 6, height 
 ## Compute costs for the whole vocab
 
 ```{r}
-pairs <- d.exp2 %>% pull(wordpair) %>% unique()
+pairs <- d.exp1 %>% pull(wordpair) %>% unique()
 
 getWalks <- function(pair) {
-  paste0('data/exp2/model_output/', pair, '-walks.json', collapse = '') %>%
+  paste0('data/exp1/model_output/', pair, '-walks.json', collapse = '') %>%
     here() %>%
     fromJSON() %>% 
     as_tibble() %>%
@@ -143,7 +140,7 @@ getWalks <- function(pair) {
     arrange(step) %>%
     mutate(cdf = cumsum(n)/2000) %>%
     filter(step %in% 2**seq(13)) %>%
-    write_csv(here(paste0('data/exp2/model_output/', pair, '-cdf.csv',collapse = '')))
+    write_csv(here(paste0('data/exp1/model_output/', pair, '-cdf.csv',collapse = '')))
 }
 
 library(furrr)
@@ -159,16 +156,16 @@ cdfs <- with_progress({
 # Reformat
 
 ```{r}
-complete_df <- read_csv(here('data/exp2/model_input/vocab.csv')) %>%
-  left_join(read_csv(here('data/exp2/model_output/ranks.csv'))) %>%
+complete_df <- read_csv(here('data/exp1/model_input/vocab.csv')) %>%
+  left_join(read_csv(here('data/exp1/model_output/ranks.csv'))) %>%
   mutate(single = (w1_index_walk + w2_index_walk)/2) %>%
   select(-`...1`, -index, -Occurrences,-Length) %>%
   gather(measure, value, -Word, -wordpair) %>%
   complete(Word, wordpair, measure, fill = list(value = 0)) %>%
   filter(!is.na(step), !is.na(wordpair))
 
-read_csv(here('data/exp2/model_input/vocab.csv')) %>%
+read_csv(here('data/exp1/model_input/vocab.csv')) %>%
   left_join(complete_df) %>%
   select(Word,wordpair,measure,value) %>%
-  write_csv(here('data/exp2/model_output/freqs_long.csv'))
+  write_csv(here('data/exp1/model_output/freqs_long.csv'))
 ```
