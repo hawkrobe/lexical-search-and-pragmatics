@@ -55,10 +55,7 @@ class Selector:
 
     # transform measures to costs
     measure_df = pd.read_csv(f"{self.exp_path}/model_output/{self.cost_type}s_long.csv")
-    if self.cost_type == 'freq':
-      measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
-    else :
-      measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
+    measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
 
     self.cost = {}
     for measure in measure_df['measure'].unique() :
@@ -111,19 +108,25 @@ class Selector:
     '''
     literal guesser probability over each wordpair
     '''
-    return softmax(self.sims[boardname], axis = 0) # 190 x vocab
+    return softmax(50*self.sims[boardname], axis = 0)
 
-  def informativity(self, boardname, targetpair_idx) :
+  @lru_cache(maxsize=None)
+  def diagnosticity(self, boardname, targetpair_idx) :
     if self.inf_type == 'RSA' :
-      diagnosticity = self.literal_guesser(boardname)[targetpair_idx].ravel()
+      return self.literal_guesser(boardname)[targetpair_idx].ravel()
     elif self.inf_type == 'additive' :
       distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
       assert(distractors.shape == (189, 12218))
-      diagnosticity = -np.max(distractors, axis=0)
+      return -np.max(distractors, axis=0)
     elif self.inf_type == 'no_prag' :
-      diagnosticity = 0
-    return ((1-self.distweight) * self.sims[boardname][targetpair_idx].ravel()
-             + self.distweight * diagnosticity)
+      return 0
+
+  def fit(self, boardname, targetpair_idx) :
+    return self.sims[boardname][targetpair_idx].ravel()
+
+  def informativity(self, boardname, targetpair_idx) :
+    return ((1-self.distweight) * self.fit(boardname, targetpair_idx)
+             + self.distweight * self.diagnosticity(boardname, targetpair_idx))
 
   def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''
@@ -181,7 +184,7 @@ class Selector:
       combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
       print(combo)
       mus = np.asarray(combo['prob_numeric'])[~np.isnan(combo['prob_numeric'])]
-      vals = np.asarray(combo['response'])[~np.isnan(combo['prob_numeric'])]
+      vals = np.asarray(combo['response_prob'])[~np.isnan(combo['prob_numeric'])]
       likelihood = -np.sum(norm.logpdf(vals, loc=mus, scale=0.1))
     else :
       likelihood = -np.sum(np.log(np.asarray(df['prob'])[~np.isnan(df['prob'])]))
@@ -192,15 +195,13 @@ class Selector:
     softplus = lambda x: np.log1p(np.exp(x))
     self.alpha = 1 #softplus(params[0])
     self.costweight = 0 # expit(params[1])
-    self.distweight = expit(params[0])
-    df = self.get_speaker_df(clues_only=True)
+    self.distweight = params[0]
+    df = self.get_speaker_df(clues_only=False)
     combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
-    combo_sub = combo.copy()[['wordpair', 'correctedClue', 'cost_fn', 'prob', 'z_rating']]
-    combo_sub.loc[:, 'prob_numeric'] = pd.to_numeric(combo_sub['prob'], errors = 'coerce')
-    corr = (combo_sub
-            .groupby(['wordpair', 'cost_fn'])
-            .apply(lambda d: d['prob_numeric'].corr(d['z_rating'], method='spearman'))
-            .groupby('wordpair').max().mean())
+    combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
+    corr = (combo
+            .groupby(['cost_fn'])
+            .apply(lambda d: d['prob_numeric'].corr(d['response'], method='spearman')).max())
     print(self.alpha, self.costweight, '(', self.distweight, ')', ':', corr)
     return -corr
 
@@ -208,16 +209,37 @@ class Selector:
     self.human_df = pd.read_csv(f"{self.exp_path}/model_input/human-ratings.csv")
     if fn == 'spearman' :
       # need to use a global optimization method
-      return scipy.optimize.basinhopping(selector.get_spearman, [-2, 0, 0])
+      return scipy.optimize.brute(selector.get_spearman, (slice(0,1.1,.1),))
     else :
       return scipy.optimize.basinhopping(selector.get_likelihood, [5, 0.1, 0.1])
-  
+
+  def print_examples(self) :
+    target_idx = list(selector.board_combos['board15']['wordpair']).index('lion-tiger')
+    fit = selector.fit('board15', target_idx)
+    diag = selector.diagnosticity('board15', target_idx)
+    inf = selector.informativity('board15', target_idx)
+    cost = selector.cost[128]['lion-tiger']
+    utility = selector.pragmatic_speaker('lion-tiger', 'board15', 256, range(len(selector.vocab)))
+    print('word, fit, diagnositicity, cost, speaker prob')
+    for word in ['cat', 'animal', 'claws', 'hiss'] :
+      idx = list(selector.vocab["Word"]).index(word)
+      print(word, ':', fit[idx], diag[idx], cost[idx], utility[idx])
+      distractor_pairs = np.delete(list(self.board_combos['board15']['wordpair']), target_idx, axis=0)
+      distractors = np.delete(self.sims['board15'], target_idx, axis=0)
+      print('biggest distractor', distractor_pairs[np.argmax(distractors,axis=0)[idx]])
+
 if __name__ == "__main__":
-  # cdf / freq
+  #exp_path = '../data/exp1/'
+  #selector = Selector(exp_path, sys.argv[1:])
+  #selector.print_examples()
+  # out = selector.get_speaker_df()
+  # out.to_csv(
+  #   f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
+  # )
+
   exp_path = '../data/exp3/'
   selector = Selector(exp_path, sys.argv[1:])
-  selector.optimize('likelihood')
-  
+  selector.optimize('spearman')
   out = selector.get_speaker_df()
   out.to_csv(
     f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
