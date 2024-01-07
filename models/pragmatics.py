@@ -173,45 +173,23 @@ class Selector:
         boards.append(boarddata)
     return pd.concat(boards)
 
-  def get_likelihood(self, params) :
-    softplus = lambda x: np.log1p(np.exp(x))
-    self.alpha = softplus(params[0])
-    self.costweight = 0#expit(params[1])
-    self.distweight = expit(params[1])
-    df = self.get_speaker_df(clues_only = True)
-    if self.exp_path == '../data/exp3/' :
-      combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
-      combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
-      print(combo)
-      mus = np.asarray(combo['prob_numeric'])[~np.isnan(combo['prob_numeric'])]
-      vals = np.asarray(combo['response_prob'])[~np.isnan(combo['prob_numeric'])]
-      likelihood = -np.sum(norm.logpdf(vals, loc=mus, scale=0.1))
-    else :
-      likelihood = -np.sum(np.log(np.asarray(df['prob'])[~np.isnan(df['prob'])]))
-    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', likelihood)
-    return likelihood
-
   def get_spearman(self, params) :
     softplus = lambda x: np.log1p(np.exp(x))
-    self.alpha = 1 #softplus(params[0])
-    self.costweight = 0 # expit(params[1])
+    self.alpha = 1         # alpha is irrelevant because spearman only looks at ranks
+    self.costweight = 0    # fix costweight at 0 for the purposes of exp 3 comparison
     self.distweight = params[0]
     df = self.get_speaker_df(clues_only=False)
     combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
     combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
-    corr = (combo
-            .groupby(['cost_fn'])
-            .apply(lambda d: d['prob_numeric'].corr(d['response'], method='spearman')).max())
+    corr = (combo.groupby(['cost_fn']).apply(
+      lambda d: d['prob_numeric'].corr(d['response'], method='spearman')
+    ).max())
     print(self.alpha, self.costweight, '(', self.distweight, ')', ':', corr)
     return -corr
 
   def optimize(self, fn) :
     self.human_df = pd.read_csv(f"{self.exp_path}/model_input/human-ratings.csv")
-    if fn == 'spearman' :
-      # need to use a global optimization method
-      return scipy.optimize.brute(selector.get_spearman, (slice(0,1.1,.1),))
-    else :
-      return scipy.optimize.basinhopping(selector.get_likelihood, [5, 0.1, 0.1])
+    return scipy.optimize.brute(selector.get_spearman, (slice(0,1.1,.1),))
 
   def print_examples(self) :
     target_idx = list(selector.board_combos['board15']['wordpair']).index('lion-tiger')
@@ -239,6 +217,8 @@ if __name__ == "__main__":
 
   exp_path = '../data/exp3/'
   selector = Selector(exp_path, sys.argv[1:])
+
+  # find optimal parameters
   selector.optimize('spearman')
   out = selector.get_speaker_df()
   out.to_csv(
