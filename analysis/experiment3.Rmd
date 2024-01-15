@@ -314,23 +314,39 @@ ggsave('plots/exp3_model_comparisons.pdf', units = 'in', height = 3, width = 7)
 diag_plot = model_plus_ratings %>%
   filter((model == "additive" & distweight %in% c( 0.24)) | 
            (model == "RSA" & distweight %in% c(0.58))) %>%
-  mutate(`model\npredictions` = scales::rescale(prob),
-         `human\nratings` = scales::rescale(response)) %>%
-  pivot_longer(names_to = "metric", cols = c(`model\npredictions`, `human\nratings`)) %>%
+  mutate(`model predictions` = scales::rescale(prob, to = c(0,1)),
+         `human ratings` = scales::rescale(response, to = c(0,1))) %>%
+  pivot_longer(names_to = "metric", cols = c(`model predictions`, `human ratings`)) %>%
   group_by(diagnosticity, metric) %>%
   tidyboot_mean(value, nboot = 1000, na.rm = T)  %>%
-  mutate(metric = fct_relevel(metric, "human\nratings", "model\npredictions"))
+  mutate(metric = fct_relevel(metric, "human ratings", "model predictions"))
 
-diag_plot %>% 
-ggplot(aes(x = metric, y = empirical_stat, group = diagnosticity, fill = diagnosticity)) +
+human = diag_plot %>% 
+  filter(metric == "human ratings") %>%
+  ggplot(aes(x = diagnosticity, y = empirical_stat, group = diagnosticity, fill = diagnosticity)) +
   geom_bar(stat = 'identity', position = "dodge") +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0, position =  position_dodge(0.9)) +
     labs(y = 'normalized ratings/predictions', x= "") +
+    facet_wrap(~metric)+
     theme_few() +
-    theme(aspect.ratio = 1, legend.position = c(0.8, 0.8)) +
+    theme(aspect.ratio = 1, legend.position = "none") +
     scale_fill_manual(values = c('darkslategray4',  '#CC253D'))
 
-ggsave('plots/exp3_model_diag.pdf', units = 'in', height = 4, width = 4)
+model = diag_plot %>% 
+  filter(metric == "model predictions") %>%
+  ggplot(aes(x = diagnosticity, y = empirical_stat, group = diagnosticity, fill = diagnosticity)) +
+  geom_bar(stat = 'identity', position = "dodge") +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0, position =  position_dodge(0.9)) +
+    labs(y = '', x= "") +
+    facet_wrap(~metric)+
+    theme_few() +
+    theme(aspect.ratio = 1, legend.position = c(0.75, 0.8)) +
+    scale_fill_manual(values = c('darkslategray4',  '#CC253D'))
+
+
+
+ggsave('plots/exp3_model_diag.pdf', units = 'in',
+       plot = gridExtra::grid.arrange(human, model, nrow = 1), height = 4, width = 8)
 
 ```
 
