@@ -219,7 +219,7 @@ if __name__ == "__main__":
   selector = Selector(exp_path, sys.argv[1:])
 
   # find optimal parameters
-  selector.optimize('spearman')
+  #selector.optimize('spearman')
   out = selector.get_speaker_df()
   out.to_csv(
     f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'

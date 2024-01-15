@@ -20,11 +20,12 @@ library(broom.mixed)
 setwd(here::here())
 getwd()
 library(ggrepel)
+library(boot)
 ```
 
 # behavioral data 
 
-## import listener data (for Level recoding)
+## import listener data
 
 ```{r}
 listener = read_csv("../data/exp3/listener.csv") %>% 
@@ -85,7 +86,7 @@ wordpair_accuracy %>%
     theme_few() +
     scale_fill_manual(values = c('#60BD68', '#D8CF23', '#CC253D'))
 
-ggsave(here('analysis/plots/e3_difficulty_dist.pdf'), units = 'in', width = 7, height = 4)
+ggsave('plots/e3_difficulty_dist.pdf', units = 'in', width = 7, height = 4)
 
 
 
@@ -112,7 +113,7 @@ listener %>%
     theme(aspect.ratio = 1, legend.position = 'none') +
     scale_fill_manual(values = c('#60BD68', '#D8CF23', '#CC253D'))
 
-ggsave(here('analysis/plots/exp3_generation_time.pdf'), units = 'in', width = 4, height = 4)
+ggsave('plots/exp3_generation_time.pdf', units = 'in', width = 4, height = 4)
 
 ## mean accuracy per clue 
 
@@ -180,7 +181,7 @@ final_data %>% left_join(wordpair_accuracy) %>%
     scale_fill_manual(values = c('#60BD68', '#D8CF23', '#CC253D'))
 
   
-ggsave(here('analysis/plots/exp3_rating_plot.pdf'), units = 'in', width = 4, height = 4)
+ggsave('plots/exp3_rating_plot.pdf', units = 'in', width = 4, height = 4)
 
 # RTs by level
 
@@ -195,7 +196,7 @@ final_data %>% left_join(wordpair_accuracy) %>%
     theme(aspect.ratio = 1, legend.position = 'none') +
     scale_fill_manual(values = c('#60BD68', '#D8CF23', '#CC253D'))
 
-ggsave(here('analysis/plots/exp3_rating_time.pdf'), units = 'in', width = 4, height = 4)
+ggsave('plots/exp3_rating_time.pdf', units = 'in', width = 4, height = 4)
 
 
 ```
@@ -213,32 +214,41 @@ original_ratings = final_data %>%
   group_by(wordpair) %>%
   mutate(z_rating = as.numeric(scale(response)))
 
+
+clue_diagnosticity = final_data %>% select(wordpair, clue, correctedClue) %>% distinct() %>%
+  left_join(clue_accuracy) %>%
+  mutate(diagnosticity = ifelse(correct <= median(correct), "low", "high"))
+
 speaker_listener = clue_accuracy %>% left_join(original_ratings) %>%
-  left_join(wordpair_accuracy %>% select(-correct))%>%
-  mutate(x = paste0(wordpair, ":", clue))
+  left_join(clue_diagnosticity %>% select(-correct))
+
+n_diag = speaker_listener %>% group_by(wordpair, diagnosticity) %>% count()
 
 label_data= speaker_listener %>% 
-  filter(wordpair %in% c("lion-tiger", "weird-trauma", "war-quiet"))
+  filter(wordpair %in% c("breeze-bubble", "weird-trauma", "tea-bean")) %>%
+  mutate(x = paste0(wordpair, ":", clue))
 
 speaker_listener %>%
-  ggplot(aes(x = response, y = correct, group = Level, color = Level)) +
-  geom_point(alpha = 0.15)+
-  geom_smooth(method = "lm")+
+  ggplot(aes(x = response, y = correct)) +
+  geom_point(alpha = 0.05)+
+  geom_smooth(method = "lm", color = "black", linewidth = 0.5)+
   geom_text_repel(
     data = label_data,
-    aes(label = clue), box.padding = 0.15, point.padding = 0.15, 
+    aes(label = clue, color = wordpair), box.padding = 0.20, point.padding = 0.15,
     max.overlaps = Inf, segment.color = NA, fontface = "bold") +
   scale_y_continuous(limits = c(0,1))+
   scale_x_continuous(limits = c(1,5))+
   theme_few() +
-  scale_color_manual(values = c('#60BD68', '#BAB504', '#CC253D'))+
+  scale_color_manual(values = c('#60BD68', '#BAB504', '#CC253D', "pink"))+
     labs(x = "speaker ratings (1-5)", y = "listener accuracy") +
-    theme(aspect.ratio = 1)
+    theme(aspect.ratio = 1)+
+  theme(legend.position = c(0.2,0.75))
 
-behavioral_model = lm(data = speaker_listener, correct ~ response*Level)
-summary(behavioral_model)
+behavioral_model = lm(data = speaker_listener, correct ~ response)
+car::Anova(behavioral_model)
 
 ggsave('plots/exp3_speaker_listener.pdf', units = 'in', width = 5, height = 5)
+
 
   
 ```
@@ -251,23 +261,21 @@ ggsave('plots/exp3_speaker_listener.pdf', units = 'in', width = 5, height = 5)
 ## import model probs
 
 ```{r}
-# clue_subset_dfs = paste0(getwd(),"/data/exp3/model_output/diagnostic_subset/")
-# full_vocab_dfs = paste0(getwd(),"/data/exp3/model_output/diagnostic_full/")
+# grid_dfs = paste0(getwd(),"/../data/exp3/model_output/diagnostic/")
 # 
-# # Assuming cost_fn needs to be converted to numeric (double)
-# speaker_dfs <- rbind(map_dfr(list.files(path = full_vocab_dfs, pattern = "\\.csv$", full.names = TRUE), 
-#                       ~read_csv(.x) %>% mutate(cost_fn = as.numeric(cost_fn))) %>% mutate(type = "1: full vocab"),
-#                      map_dfr(list.files(path = clue_subset_dfs, pattern = "\\.csv$", full.names = TRUE), 
-#                       ~read_csv(.x) %>% mutate(cost_fn = as.numeric(cost_fn))) %>% mutate(type = "2: clue subset")) 
+# speaker_dfs <-map_dfr(list.files(path = grid_dfs, pattern = "\\.csv$", full.names = TRUE), ~read_csv(.x))
 # 
-# write.csv(speaker_dfs, file = paste0(getwd(),"/data/exp3/model_output/all_speaker_dfs.csv"), row.names = FALSE)
+# write.csv(speaker_dfs, file = paste0(getwd(),"/../data/exp3/model_output/all_speaker_dfs.csv"), row.names = FALSE)
 
-speaker_dfs = read_csv("data/exp3/model_output/all_speaker_dfs.csv", row.names = FALSE)
+speaker_dfs = read_csv("../data/exp3/model_output/all_speaker_dfs.csv")
+
 model_plus_ratings = speaker_dfs %>% mutate(wordpair = tolower(wordpair)) %>%
   left_join(ratings) %>% 
   filter(!is.na(prob)) %>%
-  select(type, wordpair, correctedClue, model, alpha, costweight, distweight,  cost_fn, prob, z_rating) %>%
-  left_join(wordpair_accuracy %>% select(wordpair, Level))
+  select(wordpair, correctedClue, model, distweight, prob, z_rating, response) %>%
+  distinct()%>%
+  left_join(clue_diagnosticity)%>%
+  mutate(model = ifelse(model == "additivecdf", "additive", "RSA"))
 
 ```
 ## correlations for speaker ratings
@@ -275,73 +283,56 @@ model_plus_ratings = speaker_dfs %>% mutate(wordpair = tolower(wordpair)) %>%
 # get correlation between each model and z-ratings
 
 spearman = model_plus_ratings %>%
-  # calculate correlation for each model subtype at the wordpair level
-  group_by(Level, wordpair, type,  model,alpha, cost_fn,  costweight, distweight) %>%
-  summarise(r = cor(prob, z_rating, method = "spearman"),
-            n= n())%>%
-  mutate(informativity = sub("cdf|freq", "", model),
-          cost_source= sub(".*(cdf|freq)", "\\1", model))
+  # calculate correlation for each model and distweight 
+  group_by(model,distweight) %>%
+  # mutate(r = cor(prob, response, method = "spearman"))%>%
+  # select(model, distweight, r) %>% distinct()
+  mutate(r = psych::corr.test(prob, response, method = "spearman")$ci$r,
+           ci_lower = psych::corr.test(prob, response, method = "spearman")$ci$lower,
+           ci_upper = psych::corr.test(prob, response, method = "spearman")$ci$upper)%>%
+  select(model, distweight, r, ci_lower, ci_upper) %>% distinct()
 
+spearman %>%
+  ggplot(aes(x = distweight, y = r, group = model, color = model)) +
+  geom_line()+
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
+  geom_point(data = . %>% group_by(model) %>%
+  filter(r == max(r)), size = 1.5)+
+  theme_few() +
+    scale_color_colorblind()+
+    labs(y = "spearman correlation", x = "weight on distractors")+
+    theme(aspect.ratio = 1)+
+  theme(legend.position = c(0.2,0.3))
 
-kendall = model_plus_ratings %>%
-  # calculate correlation for each model subtype at the wordpair level
-  group_by(Level, wordpair, type,  model,alpha, cost_fn,  costweight, distweight) %>%
-  summarise(r = cor(prob, z_rating, method = "kendall"),
-            n= n())%>%
-  mutate(informativity = sub("cdf|freq", "", model),
-          cost_source= sub(".*(cdf|freq)", "\\1", model))
-
-
-avg_corr_df = rbind(kendall %>% mutate(cortype = "kendall"), 
-                       spearman %>% mutate(cortype = "spearman")) %>%
-  filter(!is.na(r))%>%
-  group_by(Level, type,  model,alpha, cost_fn,  costweight, distweight, cortype) %>%
-  # average across different costweights and distweights
-  summarize(avg_r = mean(r, na.rm = TRUE),
-            ci_lower = mean(r) - 2*sd(r)/sqrt(length(r)),
-            ci_upper= mean(r) + 2*sd(r)/sqrt(length(r))) 
-
-max_cor_df =avg_corr_df %>%
-  ungroup() %>% group_by(Level, cortype) %>%
-  filter(avg_r == max(avg_r))%>%
-  arrange(Level, desc(avg_r))
-    
-ggsave(here('analysis/plots/exp3_model_comparisons.pdf'), units = 'in', height = 3, width = 6)
+ggsave('plots/exp3_model_comparisons.pdf', units = 'in', height = 3, width = 7)
 
 ```
 
-## heatmap
+## diagnosticity
 
 ```{r}
-  
-plot1 = avg_corr_df %>%
-  filter(cortype == "spearman", model == "RSAcdf", type == "1: full vocab") %>%
-  ggplot(aes(x = costweight, y = distweight, fill = avg_r)) +
-  geom_tile()+
-    scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
-      geom_point(data = . %>% group_by(Level) %>%
-  filter(avg_r == max(avg_r)), color = "black", size = 1)+
-  facet_grid(Level~cost_fn)+
-  theme_few() +
-    labs(title = "spearman RSA cdf")+
-    theme(aspect.ratio = 1)
+diag_plot = model_plus_ratings %>%
+  filter((model == "additive" & distweight %in% c( 0.24)) | 
+           (model == "RSA" & distweight %in% c(0.58))) %>%
+  mutate(`model\npredictions` = scales::rescale(prob),
+         `human\nratings` = scales::rescale(response)) %>%
+  pivot_longer(names_to = "metric", cols = c(`model\npredictions`, `human\nratings`)) %>%
+  group_by(diagnosticity, metric) %>%
+  tidyboot_mean(value, nboot = 1000, na.rm = T)  %>%
+  mutate(metric = fct_relevel(metric, "human\nratings", "model\npredictions"))
 
-plot2 = avg_corr_df %>%
-  filter(cortype == "spearman", model == "additivecdf", type == "1: full vocab") %>%
-  ggplot(aes(x = costweight, y = distweight, fill = avg_r)) +
-  geom_tile()+
-    scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
-      geom_point(data = . %>% group_by(Level) %>%
-  filter(avg_r == max(avg_r)), color = "black", size = 1)+
-  facet_grid(Level~cost_fn)+
-  theme_few() +
-    labs(title = "spearman additive cdf")+
-    theme(aspect.ratio = 1)
+diag_plot %>% 
+ggplot(aes(x = metric, y = empirical_stat, group = diagnosticity, fill = diagnosticity)) +
+  geom_bar(stat = 'identity', position = "dodge") +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0, position =  position_dodge(0.9)) +
+    labs(y = 'normalized ratings/predictions', x= "") +
+    theme_few() +
+    theme(aspect.ratio = 1, legend.position = c(0.8, 0.8)) +
+    scale_fill_manual(values = c('darkslategray4',  '#CC253D'))
 
-gridExtra::grid.arrange(plot1, plot2)
+ggsave('plots/exp3_model_diag.pdf', units = 'in', height = 4, width = 4)
 
 ```
-
 
 # extra
 
@@ -362,7 +353,7 @@ write.csv(targets_and_clues, file = "data/exp3/revised_targets.csv", row.names =
 
 ```
 
-# board comparison
+## board comparison
 
 ```{r}
   
@@ -432,50 +423,3 @@ a_plot =  plot_data %>%
 
 
 ```
-## informativity
-```{r}
-# informativity_paths = paste0(getwd(),"/data/exp3/model_output/informativity/")
-# 
-# informativity_dfs <- map_dfr(list.files(path = informativity_paths, pattern = "\\.csv$", full.names = TRUE), 
-#                       ~read_csv(.x) %>% mutate(cost_fn = as.numeric(cost_fn))) 
-# 
-# informativity_dfs_main = informativity_dfs %>%
-#   mutate( informativity= sub("cdf|freq", "", model),
-#          cost_source = sub(".*(cdf|freq)", "\\1", model)) %>%
-#   select(-c(cost_fn, costweight, alpha, model, cost_source)) %>%
-#   distinct() %>%
-#   filter(!is.na(prob)) %>%
-#   filter(informativity != "no_prag") %>%
-#   select(-Level) %>% mutate(wordpair = tolower(wordpair)) %>%
-#   left_join(wordpair_accuracy %>% select(wordpair, Level))
-# 
-# 
-# d_plot = informativity_dfs_main %>%
-#   #filter(informativity == "additive" & distweight==0.04) %>%
-#   filter(informativity == "RSA") %>% 
-#   ggplot(aes(x = prob)) +
-#   geom_histogram(binwidth = 0.01, fill = "aquamarine4", color = "darkgray")+
-#   theme_few() +
-#     labs(x = "clue informativity score", y = "density", title = "informativity") +
-#     theme(aspect.ratio = 1, legend.position = "none")
-# 
-# gridExtra::grid.arrange(a_plot, d_plot, nrow = 1)
-# 
-# ggsave(here('analysis/plots/exp3_clue_metrics.pdf'), plot =gridExtra::grid.arrange(a_plot, d_plot, nrow = 1),
-#        units = 'in', height = 4, width = 6)
-# 
-# ## was informativity related to listener accuracy?
-# 
-# listener_accuracy = informativity_dfs_main %>%
-#   #filter(informativity == "additive" & distweight==0.04) %>% 
-#   filter(informativity == "RSA") %>% 
-#   select(wordpair,Clue1, correctedClue, prob) %>%
-#   right_join(data_wide %>% rename(Clue1 = "clue"))
-# 
-# acc_model = glmer(data = listener_accuracy, accuracy ~ prob + (1|sona_id), family = binomial,
-#                   control = glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)))
-# summary(acc_model)
-# car::Anova(acc_model)
-
-```
-
