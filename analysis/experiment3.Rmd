@@ -239,12 +239,13 @@ speaker_listener %>%
   scale_y_continuous(limits = c(0,1))+
   scale_x_continuous(limits = c(1,5))+
   theme_few() +
-  scale_color_manual(values = c('#60BD68', '#BAB504', '#CC253D', "pink"))+
-    labs(x = "speaker ratings (1-5)", y = "listener accuracy") +
+  scale_color_manual(values = c('#60BD68', 'navy', '#CC253D'))+
+    labs(x = "speaker ratings (1:low preference to 5: high preference)", y = "listener accuracy") +
     theme(aspect.ratio = 1)+
   theme(legend.position = c(0.2,0.75))
 
 behavioral_model = lm(data = speaker_listener, correct ~ response)
+summary(behavioral_model)
 car::Anova(behavioral_model)
 
 ggsave('plots/exp3_speaker_listener.pdf', units = 'in', width = 5, height = 5)
@@ -326,7 +327,7 @@ human = diag_plot %>%
   ggplot(aes(x = diagnosticity, y = empirical_stat, group = diagnosticity, fill = diagnosticity)) +
   geom_bar(stat = 'identity', position = "dodge") +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0, position =  position_dodge(0.9)) +
-    labs(y = 'normalized ratings/predictions', x= "") +
+    labs(y = 'normalized ratings', x= "") +
     facet_wrap(~metric)+
     theme_few() +
     theme(aspect.ratio = 1, legend.position = "none") +
@@ -337,8 +338,8 @@ model = diag_plot %>%
   ggplot(aes(x = diagnosticity, y = empirical_stat, group = diagnosticity, fill = diagnosticity)) +
   geom_bar(stat = 'identity', position = "dodge") +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0, position =  position_dodge(0.9)) +
-    labs(y = '', x= "") +
-    facet_wrap(~metric)+
+  labs(y = 'normalized predictions', x= "") +
+  facet_wrap(~metric)+
     theme_few() +
     theme(aspect.ratio = 1, legend.position = c(0.75, 0.8)) +
     scale_fill_manual(values = c('darkslategray4',  '#CC253D'))
@@ -349,6 +350,20 @@ ggsave('plots/exp3_model_diag.pdf', units = 'in',
        plot = gridExtra::grid.arrange(human, model, nrow = 1), height = 4, width = 8)
 
 ```
+## examples
+```{r}
+best_model = model_plus_ratings %>%
+  filter((model == "additive" & distweight %in% c( 0.24)) | 
+           (model == "RSA" & distweight %in% c(0.58))) %>%
+  mutate(`model predictions` = scales::rescale(prob, to = c(0,1)),
+         `human ratings` = scales::rescale(response, to = c(0,1)))%>%
+  filter(wordpair %in% c("lion-tiger", "weird-trauma", "breeze-bubble", "cave-knight")) %>%
+  select(wordpair, clue, model, `human ratings`, `model predictions`)%>%
+  arrange(wordpair)
+
+
+```
+
 
 # extra
 
