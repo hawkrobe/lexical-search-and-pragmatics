@@ -1,4 +1,4 @@
-# connector-pragmatics-search
+# Lexical search and pragmatics in connector
 
 ## Getting started
 
