@@ -357,7 +357,7 @@ best_model = model_plus_ratings %>%
            (model == "RSA" & distweight %in% c(0.58))) %>%
   mutate(`model predictions` = scales::rescale(prob, to = c(0,1)),
          `human ratings` = scales::rescale(response, to = c(0,1)))%>%
-  filter(wordpair %in% c("lion-tiger", "weird-trauma", "breeze-bubble", "cave-knight")) %>%
+  filter(wordpair %in% c("lion-tiger", "weird-trauma", "garage-bone", "old-new")) %>%
   select(wordpair, clue, model, `human ratings`, `model predictions`)%>%
   arrange(wordpair)
 
@@ -394,20 +394,24 @@ clean_and_unite <- function(column) {
     mutate_all(~ str_remove_all(., "\\[|\\]|\""))
 }
 
-boards = readxl::read_excel("data/all_boards.xlsx") %>%
+boards = readxl::read_excel("../data/all_boards.xlsx") %>%
   clean_and_unite() %>%
   mutate(exp1 = str_split(gsub(",\\s*", " ", exp1), "\\s+"),
          exp2 = str_split(gsub(",\\s*", " ", exp2), "\\s+"),
          exp3 = str_split(gsub(",\\s*", " ", exp3), "\\s+")) %>%
   mutate(e1e3 = map2_lgl(exp1, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))),
          e1e2 = map2_lgl(exp1, exp2, ~ identical(sort(tolower(.x)), sort(tolower(.y)))),
-         e2e3 = map2_lgl(exp2, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))))
+         e2e3 = map2_lgl(exp2, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))),
+         in_e1_not_e2 = map2(exp1, exp2, ~ setdiff(tolower(.x), tolower(.y))),
+         in_e2_not_e1 = map2(exp1, exp2, ~ setdiff(tolower(.y), tolower(.x))),
+         in_e1_not_e3 = map2(exp1, exp3, ~ setdiff(tolower(.x), tolower(.y))),
+         in_e3_not_e1 = map2(exp1, exp3, ~ setdiff(tolower(.y), tolower(.x))),
+         in_e2_not_e3 = map2(exp2, exp3, ~ setdiff(tolower(.x), tolower(.y))),
+         in_e3_not_e2 = map2(exp2, exp3, ~ setdiff(tolower(.y), tolower(.x))))
 
-e1e3_match = boards %>%
-  filter(e1e3 == TRUE)
-
-
-
+View(boards %>% filter(!e1e3))
+View(boards %>% filter(!e1e2, !is.na(exp2)))
+View(boards %>% filter(!e2e3, !is.na(exp2)))
 ```
 
 
