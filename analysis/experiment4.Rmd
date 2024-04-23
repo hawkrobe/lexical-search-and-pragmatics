@@ -1,0 +1,57 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Imports
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(ggthemes)
+library(tidyboot)
+library(here)
+library(jsonlite)
+```
+
+# read raw data
+
+```{r}
+
+all_targets = read_csv("../data/exp1/targets.csv") %>%
+  select(Word1, Word2) %>%
+  mutate(w1w2 = toupper(paste(Word1,Word2, sep = "-")),
+         w2w1 = toupper(paste(Word2,Word1, sep = "-")))
+
+targets = unique(c(all_targets$w1w2, all_targets$w2w1))
+
+raw1 = read_csv("../data/exp4/raw1.csv") %>% 
+  select(associateResp, associateRT,Prime,Target, Proc, participant, session, date) %>%
+  mutate(w1w2 = toupper(paste(Prime,Target, sep = "-")),
+         w2w1 = toupper(paste(Target,Prime, sep = "-"))) %>%
+  filter(w1w2 %in% targets | w2w1 %in% targets)
+
+raw2 = read_csv("../data/exp4/raw2.csv") %>%
+  select(associateResp, associateRT,Prime,Target, Proc, participant, session, date) %>%
+  mutate(w1w2 = toupper(paste(Prime,Target, sep = "-")),
+         w2w1 = toupper(paste(Target,Prime, sep = "-")))%>%
+  filter(w1w2 %in% targets | w2w1 %in% targets)
+
+library(dplyr)
+
+# Assuming raw1 and raw2 are your data frames
+
+cleanede4 <- bind_rows(raw1, raw2) %>%
+  group_by(participant) %>%
+  summarize(ID = paste0(sample(letters, 10, replace = TRUE), collapse = "")) %>%
+  right_join(bind_rows(raw1, raw2), by = "participant") %>%
+  select(-participant)
+
+View(cleanede4 %>%
+  group_by(ID) %>% count())
+
+write.csv(cleanede4, "../data/exp4/cleaned.csv", row.names = FALSE)
+```
+
