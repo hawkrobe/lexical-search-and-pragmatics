@@ -138,6 +138,27 @@ class Selector:
     utility = (1-self.costweight) * inf - self.costweight * cost
     return softmax(self.alpha * utility[clueset])
 
+  def get_all_clues(self) :
+    boards = []
+    for index, row in self.targets.iterrows() :
+      boardname = row["boardnames"]
+      targetpair = row['wordpair']
+      vocab = list(self.vocab["Word"])
+      clue_indices = range(len(vocab))
+      clueset = self.vocab["Word"][clue_indices]
+      y = self.pragmatic_speaker(targetpair, boardname, 2, clue_indices)
+      boarddata = pd.DataFrame({
+        'alpha' : self.alpha,
+        'costweight' : self.costweight,
+        'distweight': self.distweight,
+        'boardname': boardname,
+        'targetpair' : targetpair,
+        'prob': y,
+        'clueword' : clueset
+      })
+      boards.append(boarddata)
+    return pd.concat(boards)
+
   def get_speaker_df(self, clues_only = False):
     '''
     returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations
@@ -207,20 +228,24 @@ class Selector:
       print('biggest distractor', distractor_pairs[np.argmax(distractors,axis=0)[idx]])
 
 if __name__ == "__main__":
-  #exp_path = '../data/exp1/'
-  #selector = Selector(exp_path, sys.argv[1:])
+  exp_path = '../data/exp1/'
+  selector = Selector(exp_path, sys.argv[1:])
   #selector.print_examples()
   # out = selector.get_speaker_df()
   # out.to_csv(
   #   f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
   # )
 
-  exp_path = '../data/exp3/'
-  selector = Selector(exp_path, sys.argv[1:])
+  out = selector.get_all_clues()
+  out.to_csv(
+    f'{exp_path}/model_output/speaker_df_allclues.csv'
+  )
+
+  # exp_path = '../data/exp3/'
+  # selector = Selector(exp_path, sys.argv[1:])
 
   # find optimal parameters
-  #selector.optimize('spearman')
-  out = selector.get_speaker_df()
-  out.to_csv(
-    f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
-  )
+  # out = selector.get_speaker_df()
+  # out.to_csv(
+  #   f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
+  # )
