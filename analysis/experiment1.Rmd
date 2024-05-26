@@ -12,6 +12,10 @@ library(ggthemes)
 library(tidyboot)
 library(here)
 library(jsonlite)
+
+d.exp1 <- read_csv(here("data/exp1/cleaned.csv")) %>%
+  mutate(Level = fct_collapse(Level, Hard = c('Medium', 'Hard')))
+
 ```
 
 # 0. blended model
@@ -26,12 +30,36 @@ softmax <- function (x) {
   exp(x - logsumexp(x))
 }
 
-blended <- read_csv(here("../data/exp1/model_output/blended.csv")) %>%
+blended <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
   select(-n) %>%
-  mutate(cdf = cdf / 10) %>%
   group_by(wordpair, step, cost_weight) %>%
-  mutate(prob = softmax(cdf))
+  mutate(prob = softmax(6*cdf)) %>%
+  ungroup() %>%
+  rename(correctedClue = Word)
+```
 
+```{r}
+d.exp1 %>%
+  left_join(blended,relationship = "many-to-many") %>%
+  group_by(cost_weight, step, Level) %>%
+  summarize(loglik = sum(log(prob), na.rm = T)) %>%
+  filter(!is.na(step)) %>%
+  group_by(Level,cost_weight) %>%
+  filter(loglik == max(loglik))
+  
+  
+  #%>%
+  ggplot(aes(x = as.numeric(cost_fn), y = loglik, color = Level)) +
+    geom_line(stat = 'identity', data = . %>% filter(model == 'additivecdf'), alpha = 0.5) +
+    geom_hline(aes(yintercept = loglik, color = Level), linetype = 'dashed', data = . %>% filter(model == 'additivefreq')) +
+    geom_line(linetype = 'dotted', data = . %>% filter(model == 'no_pragcdf')) +
+    geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
+    facet_wrap(~ Level, scales = 'free') +
+    scale_x_log10(limits = c(1, 10000)) +
+    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    theme_few() +
+    labs(x = "search budget") +
+    theme(aspect.ratio = 1, legend.position = 'none')
 ```
 
 # 1. speaker selections

@@ -15,17 +15,10 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from scipy.special import softmax
 
 class Selector:
-  def __init__(self, exp_path, params) :
+  def __init__(self, exp_path, cost_type = 'none', inf_type = 'RSA') :
     # handle parameters
-    self.cost_type = params[0] if len(params) > 0 else 'cdf'
-    self.inf_type = params[1] if len(params) > 1 else 'additive'
-    self.alpha = float(params[2]) if len(params) > 2 else None
-    self.costweight = float(params[3]) if len(params) > 3 else None
-    self.distweight = float(params[4]) if len(params) > 4 else None
-    if self.inf_type == 'additive' :
-      assert(self.distweight is not None)
-    else :
-      assert(self.alpha is not None and self.costweight is not None)
+    self.cost_type = cost_type
+    self.inf_type = inf_type
 
     # read in metadata
     self.exp_path = exp_path
@@ -41,19 +34,20 @@ class Selector:
     # initialize/cache objects
     self.create_board_combos()
     self.create_cost_fn()
+
     self.sims = {
       boardname : self.create_sim_matrix(boardname)
       for boardname in self.boards.keys()
     }
 
   def create_cost_fn(self) :
-    print('building cost fn...')
-
+    self.cost = {}
+    if self.cost_type == 'none':
+      return 
+    
     # transform measures to costs
     measure_df = pd.read_csv(f"{self.exp_path}/model_output/{self.cost_type}s_long.csv")
     measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
-
-    self.cost = {}
     for measure in measure_df['measure'].unique() :
       subset = measure_df.query("measure == @measure")
       self.cost[measure] = {
@@ -120,43 +114,19 @@ class Selector:
   def fit(self, boardname, targetpair_idx) :
     return self.sims[boardname][targetpair_idx].ravel()
 
-  def informativity(self, boardname, targetpair_idx) :
-    return ((1-self.distweight) * self.fit(boardname, targetpair_idx)
-             + self.distweight * self.diagnosticity(boardname, targetpair_idx))
+  def informativity(self, distweight, boardname, targetpair) :
+    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
+    return ((1-distweight) * self.fit(boardname, targetpair_idx)
+             + distweight * self.diagnosticity(boardname, targetpair_idx))
 
   def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''
     softmax likelihood of each possible clue
     '''
-    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
-    inf = self.informativity(boardname, targetpair_idx)
-    cost = self.cost[cost_fn][targetpair].ravel()
+    inf = self.informativity(self.distweight, boardname, targetpair)
+    cost = self.cost[cost_fn][targetpair].ravel() if self.cost_type != 'none' else 0
     utility = (1-self.costweight) * inf - self.costweight * cost
     return softmax(self.alpha * utility[clueset])
-
-  def get_all_clues(self) :
-    boards = []
-    for index, row in self.targets.iterrows() :
-      boardname = row["boardnames"]
-      targetpair = row['wordpair']
-      targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
-      vocab = list(self.vocab["Word"])
-      clue_indices = range(len(vocab))
-      clueset = self.vocab["Word"][clue_indices]
-      y = self.pragmatic_speaker(targetpair, boardname, 2, clue_indices)
-      boarddata = pd.DataFrame({
-        'raw_fit' : self.fit(boardname, targetpair_idx),
-        'raw_diagnosticity' : self.diagnosticity(boardname, targetpair_idx),
-        'alpha' : self.alpha,
-        'costweight' : self.costweight,
-        'distweight': self.distweight,
-        'boardname': boardname,
-        'targetpair' : targetpair,
-        'prob': y,
-        'clueword' : clueset
-      })
-      boards.append(boarddata)
-    return pd.concat(boards)
 
   def get_speaker_df(self, clues_only = False):
     '''
@@ -215,7 +185,6 @@ class Selector:
     target_idx = list(selector.board_combos['board15']['wordpair']).index('lion-tiger')
     fit = selector.fit('board15', target_idx)
     diag = selector.diagnosticity('board15', target_idx)
-    inf = selector.informativity('board15', target_idx)
     cost = selector.cost[128]['lion-tiger']
     utility = selector.pragmatic_speaker('lion-tiger', 'board15', 256, range(len(selector.vocab)))
     print('word, fit, diagnositicity, cost, speaker prob')
