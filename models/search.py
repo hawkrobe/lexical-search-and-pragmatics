@@ -69,6 +69,8 @@ class SWOW:
       with open(f'{exp_path}/model_input/walks.pkl', 'wb') as f:
         pickle.dump(self.rw, f)
 
+
+
   def powers_of_two(self, n):
     '''
     returns all powers of 2 between 2 and n
