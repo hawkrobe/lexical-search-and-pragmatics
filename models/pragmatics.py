@@ -1,6 +1,5 @@
 import json
 import sys
-import pickle
 import itertools
 import warnings
 import scipy
@@ -13,10 +12,7 @@ import numpy as np
 import networkx as nx
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from scipy.special import softmax, expit, logit
-from scipy.stats import norm
-from joblib import Parallel, delayed, parallel_config
-from tqdm import tqdm
+from scipy.special import softmax
 
 class Selector:
   def __init__(self, exp_path, params) :
@@ -143,11 +139,14 @@ class Selector:
     for index, row in self.targets.iterrows() :
       boardname = row["boardnames"]
       targetpair = row['wordpair']
+      targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
       vocab = list(self.vocab["Word"])
       clue_indices = range(len(vocab))
       clueset = self.vocab["Word"][clue_indices]
       y = self.pragmatic_speaker(targetpair, boardname, 2, clue_indices)
       boarddata = pd.DataFrame({
+        'raw_fit' : self.fit(boardname, targetpair_idx),
+        'raw_diagnosticity' : self.diagnosticity(boardname, targetpair_idx),
         'alpha' : self.alpha,
         'costweight' : self.costweight,
         'distweight': self.distweight,

@@ -14,6 +14,26 @@ library(here)
 library(jsonlite)
 ```
 
+# 0. blended model
+
+```{r}
+logsumexp <- function (x) {
+  y = max(x)
+  y + log(sum(exp(x - y)))
+}
+
+softmax <- function (x) {
+  exp(x - logsumexp(x))
+}
+
+blended <- read_csv(here("../data/exp1/model_output/blended.csv")) %>%
+  select(-n) %>%
+  mutate(cdf = cdf / 10) %>%
+  group_by(wordpair, step, cost_weight) %>%
+  mutate(prob = softmax(cdf))
+
+```
+
 # 1. speaker selections
 
 ```{r}
@@ -111,46 +131,6 @@ likelihoods %>%
     theme(aspect.ratio = 1)
 
 ggsave(here("analysis/plots/exp1_heatmap.pdf"), units = 'in', width = 6, height = 5)
-```
-
-
-
-## Compute costs for the whole vocab
-
-```{r}
-pairs <- d.exp1 %>% pull(wordpair) %>% unique()
-
-getWalks <- function(pair) {
-  paste0('data/exp1/model_output/', pair, '-walks.json', collapse = '') %>%
-    here() %>%
-    fromJSON() %>% 
-    as_tibble() %>%
-    mutate(step = row_number()) %>%
-    gather(walk, Word, -step) %>%
-    mutate(walk = gsub('walk-', '', walk),
-           wordpair = pair) %>% 
-    group_by(walk, Word, wordpair) %>%
-    filter(step == first(step)) %>%
-    group_by(step, Word, wordpair) %>%
-    tally() %>%
-    ungroup() %>%
-    group_by(wordpair) %>%
-    complete(Word, step = 2**seq(13), fill = list(n=0)) %>%
-    group_by(Word, wordpair) %>%
-    arrange(step) %>%
-    mutate(cdf = cumsum(n)/2000) %>%
-    filter(step %in% 2**seq(13)) %>%
-    write_csv(here(paste0('data/exp1/model_output/', pair, '-cdf.csv',collapse = '')))
-}
-
-library(furrr)
-library(progressr)
-
-plan(multisession, workers = 8)
-cdfs <- with_progress({
-    p <- progressor(steps = length(pairs))
-    future_walk(pairs, ~{p(); getWalks(.x)}) 
-})
 ```
 
 # Reformat
