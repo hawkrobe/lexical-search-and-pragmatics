@@ -101,7 +101,8 @@ class Selector:
     return softmax(50*self.sims[boardname], axis = 0)
 
   @lru_cache(maxsize=None)
-  def diagnosticity(self, boardname, targetpair_idx) :
+  def diagnosticity(self, boardname, targetpair) :
+    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
     if self.inf_type == 'RSA' :
       return self.literal_guesser(boardname)[targetpair_idx].ravel()
     elif self.inf_type == 'additive' :
@@ -111,13 +112,13 @@ class Selector:
     elif self.inf_type == 'no_prag' :
       return 0
 
-  def fit(self, boardname, targetpair_idx) :
+  def fit(self, boardname, targetpair) :
+    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
     return self.sims[boardname][targetpair_idx].ravel()
 
   def informativity(self, distweight, boardname, targetpair) :
-    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
-    return ((1-distweight) * self.fit(boardname, targetpair_idx)
-             + distweight * self.diagnosticity(boardname, targetpair_idx))
+    return ((1-distweight) * self.fit(boardname, targetpair)
+             + distweight * self.diagnosticity(boardname, targetpair))
 
   def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''

@@ -20,8 +20,13 @@ class blended:
     self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
     self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
     self.vocab_size = len(list(self.vocab.Word))
+    self.cluedata = pd.read_csv(f"{exp_path}/cleaned.csv")
+
+    # expand to all rows
     self.transitions = pd.read_csv(f'{exp_path}/model_input/swow_strengths.csv')\
-                         .rename(columns={'R123.Strength' : 'weight'}) 
+                         .rename(columns={'R123.Strength' : 'weight'})\
+                         .set_index(['cue','response']).unstack(fill_value=0.0001).stack()\
+                         .reset_index()
     self.selector = Selector(exp_path)
 
     # launch grid
@@ -30,8 +35,8 @@ class blended:
         delayed(self.save_candidates)(exp_path, row, cost_weight, dist_weight)
         for ((i, row), cost_weight, dist_weight)
         in product(self.target_df.iterrows(),
-                   [0, 0.25, 0.5, 0.75, 1.0],
-                   [0, 0.25, 0.5, 0.75, 1.0])
+                   [0, 1, 2, 4, 8, 16, 100],
+                   [0, 1, 2, 4, 8, 16, 100])
       )
 
   def get_words_by_node(self, nodes):
@@ -41,23 +46,24 @@ class blended:
 
   def run_random_walks(self, row, cost_weight, dist_weight):
     # instantiate graph
-    G = nx.from_pandas_edgelist(self.transitions, 'cue', 'response', ['weight'], 
-                                create_using=nx.DiGraph)
-    
-    # add bias for high fitness clues
     boardname = row['boardnames']
     wordpair = row['wordpair']
-    clue_bias = softmax(100 * self.selector.informativity(dist_weight, boardname, wordpair))
-    for s in list(G.nodes): 
-      for t, bias in zip(self.vocab["Word"], clue_bias):
-        swow_prob = G[s][t]['weight'] if G.has_edge(s, t) else 0
-        new_weight = cost_weight * swow_prob + (1-cost_weight) * bias 
-        if new_weight > 0.001 and not G.has_edge(s,t) :
-          G.add_edge(s, t, weight = new_weight)
-        elif new_weight > 0.001 and G.has_edge(s,t) :
-          G[s][t]['weight'] = new_weight
-        elif new_weight < 0.001 and G.has_edge(s,t) :
-          G.remove_edge(s, t)
+    inf = self.selector.fit(boardname, wordpair)
+    biases = pd.DataFrame({'response' : self.vocab['Word'], 'bias' : inf})
+    edges = pd.merge(self.transitions, biases)
+    edges['combination'] = cost_weight * np.log(edges['weight']) \
+                           + dist_weight * np.log(edges['bias'])
+    edges['prob'] = edges.groupby(['cue'])['combination'].transform(softmax)
+
+    # sparsify
+    edges = edges[edges['prob'] > 0.0001]
+    G = nx.from_pandas_edgelist(edges, 'cue', 'response', ['prob'], 
+                                create_using=nx.DiGraph)
+    
+    # make sure all nodes are in there
+    for s in self.vocab['Word']: 
+      if not G.has_node(s) :
+          G.add_node(s)
 
     # run walks
     self.graph = nx.convert_node_labels_to_integers(G, label_attribute = 'word')
@@ -103,6 +109,10 @@ class blended:
     df = df[df['step'].isin( 2 ** np.arange(14))]
     df['cost_weight'] = cost_weight
     df['dist_weight'] = dist_weight
+
+    # take softmax over words at each step
+    df['prob'] = df.groupby(['wordpair', 'step'])["cdf"].transform(lambda x: softmax(np.log(x)))
+    df = df[df['Word'].isin(self.cluedata['correctedClue'])]
 
     output_path = os.path.join(exp_path, 'model_output', f'{row['wordpair']}-{cost_weight}-{dist_weight}-cdf-blended.csv')
     df.to_csv(output_path, index=False)
