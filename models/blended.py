@@ -23,7 +23,7 @@ class blended:
     self.transitions = pd.read_csv(f'{exp_path}/model_input/swow_strengths.csv')\
                          .rename(columns={'R123.Strength' : 'weight'}) 
 
-    # generated with "python pragmatics.py cdf RSA 100 0 0.5"
+    # generated with "python pragmatics.py cdf RSA 100 0"
     self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
 
     # launch grid
@@ -31,7 +31,8 @@ class blended:
       parallel(
         delayed(self.save_candidates)(exp_path, cost_weight, word1, word2)
         for (word1, word2), cost_weight
-        in product(zip(self.target_df['Word1'], self.target_df['Word2']), [0, 0.1, 0.5, 0.9, 1])
+        in product(zip(self.target_df['Word1'], self.target_df['Word2']), 
+                   [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
       )
 
   def get_words_by_node(self, nodes):
@@ -107,7 +108,7 @@ class blended:
     df.to_csv(output_path, index=False)
 
 if __name__ == "__main__":
-  np.random.seed(1235)
+  np.random.seed(1234)
   swow_exp1 = blended('../data/exp1')
   # swow_exp2 = blended('../data/exp2')
   # swow_exp3 = blended('../data/exp3')

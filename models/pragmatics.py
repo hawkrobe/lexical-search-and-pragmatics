@@ -15,10 +15,19 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from scipy.special import softmax
 
 class Selector:
-  def __init__(self, exp_path, cost_type = 'none', inf_type = 'RSA') :
+  def __init__(
+      self,
+      exp_path,
+      cost_type = 'none',
+      inf_type = 'RSA',
+      alpha = 100,
+      costweight = 0
+  ) :
     # handle parameters
     self.cost_type = cost_type
     self.inf_type = inf_type
+    self.alpha = alpha
+    self.costweight = costweight
 
     # read in metadata
     self.exp_path = exp_path
@@ -117,8 +126,7 @@ class Selector:
     return self.sims[boardname][targetpair_idx].ravel()
 
   def informativity(self, distweight, boardname, targetpair) :
-    return ((1-distweight) * self.fit(boardname, targetpair)
-             + distweight * self.diagnosticity(boardname, targetpair))
+    return self.diagnosticity(boardname, targetpair)
 
   def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''
@@ -158,7 +166,6 @@ class Selector:
         boarddata.loc[:,"cost_fn"] = cost_fn
         boarddata.loc[:,"alpha"] = self.alpha
         boarddata.loc[:,"costweight"] = self.costweight
-        boarddata.loc[:,"distweight"] = self.distweight
         boarddata.loc[:,"model"] = self.inf_type + self.cost_type
         boarddata.loc[:,"prob"] = speaker_probs
         boards.append(boarddata)
@@ -168,14 +175,13 @@ class Selector:
     softplus = lambda x: np.log1p(np.exp(x))
     self.alpha = 1         # alpha is irrelevant because spearman only looks at ranks
     self.costweight = 0    # fix costweight at 0 for the purposes of exp 3 comparison
-    self.distweight = params[0]
     df = self.get_speaker_df(clues_only=False)
     combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
     combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
     corr = (combo.groupby(['cost_fn']).apply(
       lambda d: d['prob_numeric'].corr(d['response'], method='spearman')
     ).max())
-    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', corr)
+    print(self.alpha, self.costweight,  ':', corr)
     return -corr
 
   def optimize(self, fn) :
@@ -198,7 +204,7 @@ class Selector:
 
 if __name__ == "__main__":
   exp_path = '../data/exp1/'
-  selector = Selector(exp_path, sys.argv[1:])
+  selector = Selector(exp_path)
   #selector.print_examples()
   # out = selector.get_speaker_df()
   # out.to_csv(
