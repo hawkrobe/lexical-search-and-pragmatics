@@ -14,6 +14,10 @@ library(here)
 library(jsonlite)
 ```
 
+```{r}
+d.exp1 <- read_csv(here("data/exp1/cleaned.csv"))
+```
+
 # 0. blended model
 
 ```{r}
@@ -26,19 +30,29 @@ softmax <- function (x) {
   exp(x - logsumexp(x))
 }
 
-blended <- read_csv(here("../data/exp1/model_output/blended.csv")) %>%
+blended <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
   select(-n) %>%
   mutate(cdf = cdf / 10) %>%
   group_by(wordpair, step, cost_weight) %>%
-  mutate(prob = softmax(cdf))
+  mutate(model_prob = softmax(5 * cdf)) %>%
+  rename(correctedClue = Word)
 
+blended %>%
+  right_join(d.exp1) %>% 
+  group_by(step, cost_weight) %>%
+  summarize(loglik = sum(log(model_prob), na.rm = TRUE)) %>%
+  ggplot(aes(x = step, y = loglik, color = cost_weight, group = cost_weight)) +
+    geom_line() +
+    #geom_point(data = . %>% group_by(step) %>% filter(loglik == max(loglik))) +
+    scale_x_log10() +
+    theme_few() +
+    labs(x = "cost weight") +
+    theme(aspect.ratio = 1)
 ```
 
 # 1. speaker selections
 
 ```{r}
-d.exp1 <- read_csv(here("data/exp1/cleaned.csv"))
-
 likelihoods <- read_csv(here("data/exp1/model_output/speaker_df.csv")) %>%
   select(model, wordpair, alpha, costweight, distweight, correctedClue, Level, cost_fn, prob) %>%
   mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) 
