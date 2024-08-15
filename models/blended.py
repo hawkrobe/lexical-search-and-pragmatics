@@ -31,7 +31,7 @@ class blended:
       parallel(
         delayed(self.save_candidates)(exp_path, cost_weight, word1, word2)
         for (word1, word2), cost_weight
-        in product(zip(self.target_df['Word1'], self.target_df['Word2']), [0.1, 0.5, 0.9])
+        in product(zip(self.target_df['Word1'], self.target_df['Word2']), [0, 0.1, 0.5, 0.9, 1])
       )
 
   def get_words_by_node(self, nodes):
@@ -67,7 +67,7 @@ class blended:
     self.rw = walker.random_walks(
       self.graph, 
       n_walks=1000, 
-      walk_len=1024, 
+      walk_len=8195,
       start_nodes=[self.name_to_index[name] for name in self.target_words]
     )
 
@@ -94,7 +94,7 @@ class blended:
     i = pd.MultiIndex.from_product([
       df['Word'].unique(), 
       df['wordpair'].unique(), 
-      range(1, 1025)
+      range(1, 8195)
     ], names=['Word', 'wordpair', 'step'])
     df = df.set_index(['Word', 'wordpair', 'step']) \
            .reindex(i, fill_value=0).reset_index()
