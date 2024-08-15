@@ -1,14 +1,13 @@
 import os
 import walker
+import warnings
 
 import pandas as pd
 import numpy as np
 import networkx as nx
 
-from pragmatics import Selector
 from itertools import product
 from joblib import Parallel, delayed
-from scipy.special import softmax
 
 class blended:
   def __init__(self, exp_path):
@@ -17,20 +16,18 @@ class blended:
 
     # import target words
     self.target_df = pd.read_csv(f"{exp_path}/targets.csv")
+    self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
     self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
     self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
     self.vocab_size = len(list(self.vocab.Word))
-    self.cluedata = pd.read_csv(f"{exp_path}/cleaned.csv")
-
-    # expand to all rows
     self.transitions = pd.read_csv(f'{exp_path}/model_input/swow_strengths.csv')\
-                         .rename(columns={'R123.Strength' : 'weight'})\
-                         .set_index(['cue','response']).unstack(fill_value=0.0001).stack()\
-                         .reset_index()
-    self.selector = Selector(exp_path)
+                         .rename(columns={'R123.Strength' : 'weight'}) 
+
+    # generated with "python pragmatics.py cdf RSA 100 0 0.5"
+    self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
 
     # launch grid
-    with Parallel(n_jobs=100) as parallel:
+    with Parallel(n_jobs=2) as parallel:
       parallel(
         delayed(self.save_candidates)(exp_path, cost_weight, word1, word2)
         for (word1, word2), cost_weight
@@ -38,30 +35,30 @@ class blended:
       )
 
   def get_words_by_node(self, nodes):
-    return [self.index_to_name[index] 
-            if index in self.index_to_name else None
+    return [self.index_to_name[index] if index in self.index_to_name else None
             for index in nodes]
 
-  def run_random_walks(self, row, cost_weight, dist_weight):
+  def run_random_walks(self, cost_weight, clues):
     # instantiate graph
-    boardname = row['boardnames']
-    wordpair = row['wordpair']
-    inf = self.selector.fit(boardname, wordpair)
-    biases = pd.DataFrame({'response' : self.vocab['Word'], 'bias' : inf})
-    edges = pd.merge(self.transitions, biases)
-    edges['combination'] = cost_weight * np.log(edges['weight']) \
-                           + dist_weight * np.log(edges['bias'])
-    edges['prob'] = edges.groupby(['cue'])['combination'].transform(softmax)
-
-    # sparsify
-    edges = edges[edges['prob'] > 0.0001]
-    G = nx.from_pandas_edgelist(edges, 'cue', 'response', ['prob'], 
+    G = nx.from_pandas_edgelist(self.transitions, 'cue', 'response', ['weight'], 
                                 create_using=nx.DiGraph)
     
-    # make sure all nodes are in there
-    for s in self.vocab['Word']: 
-      if not G.has_node(s) :
-          G.add_node(s)
+    # add bias for high fitness clues
+    clue_bias = self.sims.query(f"targetpair == '{clues[0]}-{clues[1]}'")\
+                         .rename(columns={'clueword' : 'response'})
+    
+    for s in G.nodes: 
+      for t, bias in zip(clue_bias['response'], clue_bias['prob']):
+        # add missing edges
+        if not G.has_edge(s, t) and bias > 0.001 :
+          G.add_edge(s, t, weight=bias)
+        # reweight edge
+        if G.has_edge(s, t) :
+          w = cost_weight * G[s][t]['weight'] + (1-cost_weight) * bias
+          G[s][t]['weight'] = w
+        # prune low-weight edges
+        if G.has_edge(s, t) and G[s][t]['weight'] < 0.001 :
+          G.remove_edge(s, t)
 
     # run walks
     self.graph = nx.convert_node_labels_to_integers(G, label_attribute = 'word')
@@ -74,13 +71,12 @@ class blended:
       start_nodes=[self.name_to_index[name] for name in self.target_words]
     )
 
-  def save_candidates(self, exp_path, row, cost_weight, dist_weight) :
+  def save_candidates(self, exp_path, cost_weight, word1, word2) :
     '''
     write out walks in order of words visited
     '''
-    self.run_random_walks(row, cost_weight, dist_weight)
-    print(f"Saving candidates for {row['wordpair']}-{cost_weight}-{dist_weight}")
-    word1, word2 = row['wordpair'].split('-')
+    self.run_random_walks(cost_weight, [word1, word2])
+    print(f"Saving candidates for {word1}-{word2}-{cost_weight}")
     w1_walks = [x for x in self.rw if x[0] == self.name_to_index[word1]]
     w2_walks = [x for x in self.rw if x[0] == self.name_to_index[word2]]
   
@@ -92,7 +88,7 @@ class blended:
     df['step'] = range(1, len(df) + 1)
     df = df.melt(id_vars='step', var_name='walk', value_name='Word')
     df['walk'] = df['walk'].str.replace('walk-', '')
-    df['wordpair'] = row['wordpair']
+    df['wordpair'] = word1 + '-' + word2
     df = df.groupby(['walk', 'Word', 'wordpair']).agg({'step': 'first'}).reset_index()
     df = df.groupby(['step', 'Word', 'wordpair']).size().reset_index(name='n')
     i = pd.MultiIndex.from_product([
@@ -106,13 +102,8 @@ class blended:
     df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 2000
     df = df[df['step'].isin( 2 ** np.arange(14))]
     df['cost_weight'] = cost_weight
-    df['dist_weight'] = dist_weight
 
-    # take softmax over words at each step
-    df['prob'] = df.groupby(['wordpair', 'step'])["cdf"].transform(lambda x: softmax(np.log(x)))
-    df = df[df['Word'].isin(self.cluedata['correctedClue'])]
-
-    output_path = os.path.join(exp_path, 'model_output', f'{row['wordpair']}-{cost_weight}-{dist_weight}-cdf-blended.csv')
+    output_path = os.path.join(exp_path, 'model_output', f'{word1}-{word2}-{cost_weight}-cdf-blended.csv')
     df.to_csv(output_path, index=False)
 
 if __name__ == "__main__":
