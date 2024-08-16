@@ -110,8 +110,7 @@ class Selector:
     return softmax(50*self.sims[boardname], axis = 0)
 
   @lru_cache(maxsize=None)
-  def diagnosticity(self, boardname, targetpair) :
-    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
+  def diagnosticity(self, boardname, targetpair_idx) :
     if self.inf_type == 'RSA' :
       return self.literal_guesser(boardname)[targetpair_idx].ravel()
     elif self.inf_type == 'additive' :
@@ -121,18 +120,12 @@ class Selector:
     elif self.inf_type == 'no_prag' :
       return 0
 
-  def fit(self, boardname, targetpair) :
-    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
-    return self.sims[boardname][targetpair_idx].ravel()
-
-  def informativity(self, distweight, boardname, targetpair) :
-    return self.diagnosticity(boardname, targetpair)
-
   def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''
     softmax likelihood of each possible clue
     '''
-    inf = self.informativity(self.distweight, boardname, targetpair)
+    targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
+    inf = self.diagnosticity(boardname, targetpair_idx)
     cost = self.cost[cost_fn][targetpair].ravel() if self.cost_type != 'none' else 0
     utility = (1-self.costweight) * inf - self.costweight * cost
     return softmax(self.alpha * utility[clueset])
@@ -171,6 +164,28 @@ class Selector:
         boards.append(boarddata)
     return pd.concat(boards)
 
+  def get_all_clues(self) :
+    boards = []
+    for index, row in self.targets.iterrows() :
+      boardname = row["boardnames"]
+      targetpair = row['wordpair']
+      targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
+      vocab = list(self.vocab["Word"])
+      clue_indices = range(len(vocab))
+      clueset = self.vocab["Word"][clue_indices]
+      y = self.pragmatic_speaker(targetpair, boardname, 2, clue_indices)
+      boarddata = pd.DataFrame({
+        'raw_diagnosticity' : self.diagnosticity(boardname, targetpair_idx),
+        'alpha' : self.alpha,
+        'costweight' : self.costweight,
+        'boardname': boardname,
+        'targetpair' : targetpair,
+        'prob': y,
+        'clueword' : clueset
+      })
+      boards.append(boarddata)
+    return pd.concat(boards)
+
   def get_spearman(self, params) :
     softplus = lambda x: np.log1p(np.exp(x))
     self.alpha = 1         # alpha is irrelevant because spearman only looks at ranks
@@ -190,14 +205,13 @@ class Selector:
 
   def print_examples(self) :
     target_idx = list(selector.board_combos['board15']['wordpair']).index('lion-tiger')
-    fit = selector.fit('board15', target_idx)
     diag = selector.diagnosticity('board15', target_idx)
     cost = selector.cost[128]['lion-tiger']
     utility = selector.pragmatic_speaker('lion-tiger', 'board15', 256, range(len(selector.vocab)))
-    print('word, fit, diagnositicity, cost, speaker prob')
+    print('word, diagnositicity, cost, speaker prob')
     for word in ['cat', 'animal', 'claws', 'hiss'] :
       idx = list(selector.vocab["Word"]).index(word)
-      print(word, ':', fit[idx], diag[idx], cost[idx], utility[idx])
+      print(word, ':',  diag[idx], cost[idx], utility[idx])
       distractor_pairs = np.delete(list(self.board_combos['board15']['wordpair']), target_idx, axis=0)
       distractors = np.delete(self.sims['board15'], target_idx, axis=0)
       print('biggest distractor', distractor_pairs[np.argmax(distractors,axis=0)[idx]])

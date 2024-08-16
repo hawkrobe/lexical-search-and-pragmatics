@@ -27,7 +27,7 @@ class blended:
     self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
 
     # launch grid
-    with Parallel(n_jobs=2) as parallel:
+    with Parallel(n_jobs=100) as parallel:
       parallel(
         delayed(self.save_candidates)(exp_path, cost_weight, word1, word2)
         for (word1, word2), cost_weight
