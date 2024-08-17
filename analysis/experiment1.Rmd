@@ -40,25 +40,34 @@ blended_raw <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
 
 ```{r}
 blended <- blended_raw %>%
-  group_by(wordpair) %>%
-  mutate(prob = softmax(10 * cdf)) %>%
+  group_by(wordpair, step, cost_weight) %>%
+  mutate(prob = softmax(5 * cdf)) %>%
   ungroup() %>%
   right_join(d_exp1, relationship = "many-to-many") %>%
-  group_by(wordpair, cost_weight, step) %>%
+  group_by(Level, cost_weight, step) %>%
   summarize(loglik = sum(log(prob), na.rm = TRUE))
 
+blended %>%
+  filter(!is.na(cost_weight)) %>%
+  group_by(Level) %>%
+  filter(loglik == max(loglik))
+```
+
+```{r}
 blended %>%
   ggplot(aes(x = as.numeric(step), y = loglik,
              color = cost_weight, group = cost_weight,
              linetype = cost_weight %in% c(0,1))) +
     geom_line() +
-    facet_wrap(wordpair ~ ., scales = 'free') +
+    facet_grid(Level ~ ., scales = 'free') +
     scale_x_log10() +
-    ylim(-33000, -22000) +
     theme_few() +
     labs(x = "search budget") +
-    theme(aspect.ratio = 1)
+    theme(aspect.ratio = 1, legend.position = 'none')
+
+ggsave('blended.pdf', height = 15, width = 15)
 ```
+
 
 # 1. speaker selections
 
