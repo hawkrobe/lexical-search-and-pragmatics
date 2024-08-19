@@ -20,7 +20,7 @@ class Selector:
       exp_path,
       cost_type = 'none',
       inf_type = 'RSA',
-      alpha = 50,
+      alpha = 20,
       costweight = 0
   ) :
     # handle parameters
@@ -128,10 +128,10 @@ class Selector:
     softmax likelihood of each possible clue
     '''
     targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
-    fit = self.fit(boardname, targetpair_idx)
-    #inf = self.diagnosticity(boardname, targetpair_idx)
+    #fit = self.fit(boardname, targetpair_idx)
+    inf = self.diagnosticity(boardname, targetpair_idx)
     cost = self.cost[cost_fn][targetpair].ravel() if self.cost_type != 'none' else 0
-    utility = (1-self.costweight) * fit - self.costweight * cost
+    utility = (1-self.costweight) * inf - self.costweight * cost
     return softmax(self.alpha * utility[clueset])
 
   def get_speaker_df(self, clues_only = False):
