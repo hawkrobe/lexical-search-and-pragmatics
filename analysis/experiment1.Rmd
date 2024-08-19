@@ -30,32 +30,45 @@ softmax <- function(x) {
   exp(x - logsumexp(x))
 }
 
-blended <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
+blended_raw <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
   select(-n) %>%
-  group_by(wordpair, step, cost_weight, dist_weight) %>%
-  mutate(prob = softmax(6 * cdf)) %>%
-  ungroup() %>%
-  rename(correctedClue = Word)
+  filter(!is.na(bias_weight)) %>%
+  rename(correctedClue = Word) %>%
+  group_by(wordpair) %>%
+  complete(correctedClue, bias_weight, step, fill = list(cdf = 0))
 ```
 
 ```{r}
-best_vals <- d_exp1 %>%
-  left_join(blended, relationship = "many-to-many") %>%
-  group_by(cost_weight, dist_weight, step, Level) %>%
-  summarize(loglik = sum(log(prob), na.rm = TRUE)) %>%
-  filter(!is.na(step)) %>%
-  group_by(Level, cost_weight, dist_weight) %>%
-  filter(loglik == max(loglik))
+blended <- blended_raw %>%
+  group_by(wordpair, step,  bias_weight) %>%
+  mutate(prob = softmax(5 * cdf)) %>%
+  ungroup() %>%
+  right_join(d_exp1, relationship = "many-to-many") %>%
+  group_by(Level, bias_weight, step) %>%
+  summarize(loglik = sum(log(prob), na.rm = TRUE))
 
-best_vals %>%
-  ggplot(aes(x = as.numeric(cost_weight), y = loglik,
-             color = dist_weight, group = dist_weight)) +
+blended %>%
+  filter(!is.na(bias_weight)) %>%
+  group_by(Level) %>%
+  filter(loglik == max(loglik))
+```
+
+```{r}
+blended %>%
+  ggplot(aes(x = as.numeric(step), y = loglik,
+             color = bias_weight, group = bias_weight,
+             linetype = bias_weight %in% c(0,1))) +
     geom_line() +
-    facet_wrap(~ Level, scales = 'free') +
+    facet_grid(Level ~ ., scales = 'free') +
+    scale_x_log10() +
+    ylim(NA, -4000) +
     theme_few() +
     labs(x = "search budget") +
-    theme(aspect.ratio = 1)
+    theme(aspect.ratio = 1, legend.position = 'right')
+
+ggsave('blended.pdf', height = 15, width = 15)
 ```
+
 
 # 1. speaker selections
 
