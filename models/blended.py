@@ -27,62 +27,59 @@ class blended:
     self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
 
     # launch grid
-    with Parallel(n_jobs=100) as parallel:
+    with Parallel(n_jobs=11) as parallel:
       parallel(
-        delayed(self.save_candidates)(exp_path, cost_weight, word1, word2)
-        for (word1, word2), cost_weight
+        delayed(self.save_candidates)(exp_path, bias_weight, word1, word2)
+        for (word1, word2), bias_weight
         in product(zip(self.target_df['Word1'], self.target_df['Word2']), 
-                   [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
+                   [0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
       )
 
   def get_words_by_node(self, nodes):
     return [self.index_to_name[index] if index in self.index_to_name else None
             for index in nodes]
 
-  def run_random_walks(self, cost_weight, clues):
+  def run_random_walks(self, bias_weight, clues):
     # instantiate graph
     G = nx.from_pandas_edgelist(self.transitions, 'cue', 'response', ['weight'], 
                                 create_using=nx.DiGraph)
-    
+
     # add bias for high fitness clues
     clue_bias = self.sims.query(f"targetpair == '{clues[0]}-{clues[1]}'")\
                          .rename(columns={'clueword' : 'response'})
-    
-    for s in G.nodes: 
-      for t, bias in zip(clue_bias['response'], clue_bias['prob']):
+    for s in G.copy().nodes: 
+      for t, bias in zip(clue_bias['response'], clue_bias['raw_diagnosticity']):
         # add missing edges
-        if not G.has_edge(s, t) and bias > 0.001 :
-          G.add_edge(s, t, weight=bias)
-        # reweight edge
-        if G.has_edge(s, t) :
-          w = cost_weight * G[s][t]['weight'] + (1-cost_weight) * bias
-          G[s][t]['weight'] = w
+        if not G.has_edge(s, t) and bias_weight * bias > 0.00001 :
+          G.add_edge(s, t, weight= bias_weight * bias)
+
+        # reweight edges
+        elif G.has_edge(s, t):
+          G[s][t]['weight'] = (1 - bias_weight) * G[s][t]['weight'] + bias_weight * bias
+
         # prune low-weight edges
-        if G.has_edge(s, t) and G[s][t]['weight'] < 0.001 :
+        if G.has_edge(s, t) and G[s][t]['weight'] < 0.00001 :
           G.remove_edge(s, t)
 
     # run walks
-    self.graph = nx.convert_node_labels_to_integers(G, label_attribute = 'word')
-    self.index_to_name = {k: v['word'] for k,v in self.graph.nodes(data=True)}
-    self.name_to_index = {v['word'] : k for k,v in self.graph.nodes(data=True)}
-    self.rw = walker.random_walks(
-      self.graph, 
-      n_walks=1000, 
+    graph = nx.convert_node_labels_to_integers(G, label_attribute = 'word')
+    self.index_to_name = {k: v['word'] for k,v in graph.nodes(data=True)}
+    self.name_to_index = {v['word'] : k for k,v in graph.nodes(data=True)}
+    return walker.random_walks(
+      graph, 
+      n_walks=1000,
       walk_len=8195,
       start_nodes=[self.name_to_index[name] for name in self.target_words]
     )
 
-  def save_candidates(self, exp_path, cost_weight, word1, word2) :
+  def save_candidates(self, exp_path, bias_weight, word1, word2) :
     '''
     write out walks in order of words visited
     '''
-    self.run_random_walks(cost_weight, [word1, word2])
-    print(f"Saving candidates for {word1}-{word2}-{cost_weight}")
-    w1_walks = [x for x in self.rw if x[0] == self.name_to_index[word1]]
-    w2_walks = [x for x in self.rw if x[0] == self.name_to_index[word2]]
-  
-    d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(1000)}
-    d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(1000)})
+    rw = self.run_random_walks(bias_weight, [word1, word2])
+    print(f"Saving candidates for {word1}-{word2}-{bias_weight}")
+    
+    d = {f'walk-{int(i)}': self.get_words_by_node(rw[i]) for i in range(1000)}
     
     # get cumulative sums
     df = pd.DataFrame(d)
@@ -100,15 +97,15 @@ class blended:
     df = df.set_index(['Word', 'wordpair', 'step']) \
            .reindex(i, fill_value=0).reset_index()
     df = df.sort_values(['Word', 'wordpair', 'step'])
-    df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 2000
-    df = df[df['step'].isin( 2 ** np.arange(14))]
-    df['cost_weight'] = cost_weight
+    df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 1000
+    df = df[df['step'].isin(2 ** np.arange(14))]
+    df['bias_weight'] = bias_weight
 
-    output_path = os.path.join(exp_path, 'model_output', f'{word1}-{word2}-{cost_weight}-cdf-blended.csv')
+    output_path = os.path.join(exp_path, 'model_output', f'{word1}-{word2}-{bias_weight}-cdf-blended.csv')
     df.to_csv(output_path, index=False)
 
 if __name__ == "__main__":
-  np.random.seed(1234)
+  np.random.seed(23456)
   swow_exp1 = blended('../data/exp1')
   # swow_exp2 = blended('../data/exp2')
   # swow_exp3 = blended('../data/exp3')

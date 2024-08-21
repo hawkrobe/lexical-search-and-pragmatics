@@ -20,7 +20,7 @@ class Selector:
       exp_path,
       cost_type = 'none',
       inf_type = 'RSA',
-      alpha = 100,
+      alpha = 20,
       costweight = 0
   ) :
     # handle parameters
@@ -109,6 +109,9 @@ class Selector:
     '''
     return softmax(50*self.sims[boardname], axis = 0)
 
+  def fit(self, boardname, targetpair_idx) :
+    return self.sims[boardname][targetpair_idx].ravel()
+
   @lru_cache(maxsize=None)
   def diagnosticity(self, boardname, targetpair_idx) :
     if self.inf_type == 'RSA' :
@@ -125,6 +128,7 @@ class Selector:
     softmax likelihood of each possible clue
     '''
     targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
+    #fit = self.fit(boardname, targetpair_idx)
     inf = self.diagnosticity(boardname, targetpair_idx)
     cost = self.cost[cost_fn][targetpair].ravel() if self.cost_type != 'none' else 0
     utility = (1-self.costweight) * inf - self.costweight * cost
