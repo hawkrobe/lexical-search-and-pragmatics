@@ -27,7 +27,7 @@ class blended:
     self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
 
     # launch grid
-    with Parallel(n_jobs=1) as parallel:
+    with Parallel(n_jobs=11) as parallel:
       parallel(
         delayed(self.save_candidates)(exp_path, bias_weight, word1, word2)
         for (word1, word2), bias_weight
@@ -48,9 +48,9 @@ class blended:
     clue_bias = self.sims.query(f"targetpair == '{clues[0]}-{clues[1]}'")\
                          .rename(columns={'clueword' : 'response'})
     for s in G.copy().nodes: 
-      for t, bias in zip(clue_bias['response'], clue_bias['prob']):
+      for t, bias in zip(clue_bias['response'], clue_bias['raw_diagnosticity']):
         # add missing edges
-        if not G.has_edge(s, t) and bias_weight * bias > 0.00005 :
+        if not G.has_edge(s, t) and bias_weight * bias > 0.00001 :
           G.add_edge(s, t, weight= bias_weight * bias)
 
         # reweight edges
@@ -58,7 +58,7 @@ class blended:
           G[s][t]['weight'] = (1 - bias_weight) * G[s][t]['weight'] + bias_weight * bias
 
         # prune low-weight edges
-        if G.has_edge(s, t) and G[s][t]['weight'] < 0.00005 :
+        if G.has_edge(s, t) and G[s][t]['weight'] < 0.00001 :
           G.remove_edge(s, t)
 
     # run walks
@@ -78,11 +78,8 @@ class blended:
     '''
     rw = self.run_random_walks(bias_weight, [word1, word2])
     print(f"Saving candidates for {word1}-{word2}-{bias_weight}")
-    w1_walks = [x for x in rw if x[0] == self.name_to_index[word1]]
-    w2_walks = [x for x in rw if x[0] == self.name_to_index[word2]]
-  
-    d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(1000)}
-    d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(1000)})
+    
+    d = {f'walk-{int(i)}': self.get_words_by_node(rw[i]) for i in range(1000)}
     
     # get cumulative sums
     df = pd.DataFrame(d)
@@ -100,7 +97,7 @@ class blended:
     df = df.set_index(['Word', 'wordpair', 'step']) \
            .reindex(i, fill_value=0).reset_index()
     df = df.sort_values(['Word', 'wordpair', 'step'])
-    df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 2000
+    df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 1000
     df = df[df['step'].isin(2 ** np.arange(14))]
     df['bias_weight'] = bias_weight
 
