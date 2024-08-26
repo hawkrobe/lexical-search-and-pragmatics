@@ -27,12 +27,12 @@ class blended:
     self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
 
     # launch grid
-    with Parallel(n_jobs=11) as parallel:
+    with Parallel(n_jobs=9) as parallel:
       parallel(
         delayed(self.save_candidates)(exp_path, bias_weight, word1, word2)
         for (word1, word2), bias_weight
         in product(zip(self.target_df['Word1'], self.target_df['Word2']), 
-                   [0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
+                   [0.05, 0.1, 0.25, 0.5, 0.75, 1])
       )
 
   def get_words_by_node(self, nodes):
@@ -78,8 +78,11 @@ class blended:
     '''
     rw = self.run_random_walks(bias_weight, [word1, word2])
     print(f"Saving candidates for {word1}-{word2}-{bias_weight}")
-    
-    d = {f'walk-{int(i)}': self.get_words_by_node(rw[i]) for i in range(1000)}
+    w1_walks = [x for x in rw if x[0] == self.name_to_index[word1]]
+    w2_walks = [x for x in rw if x[0] == self.name_to_index[word2]]
+
+    d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(1000)}
+    d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(1000)})
     
     # get cumulative sums
     df = pd.DataFrame(d)
@@ -97,7 +100,7 @@ class blended:
     df = df.set_index(['Word', 'wordpair', 'step']) \
            .reindex(i, fill_value=0).reset_index()
     df = df.sort_values(['Word', 'wordpair', 'step'])
-    df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 1000
+    df['cdf'] = df.groupby(['Word', 'wordpair'])['n'].cumsum() / 2000
     df = df[df['step'].isin(2 ** np.arange(14))]
     df['bias_weight'] = bias_weight
 
@@ -105,7 +108,7 @@ class blended:
     df.to_csv(output_path, index=False)
 
 if __name__ == "__main__":
-  np.random.seed(23456)
+  np.random.seed(12345)
   swow_exp1 = blended('../data/exp1')
   # swow_exp2 = blended('../data/exp2')
   # swow_exp3 = blended('../data/exp3')
