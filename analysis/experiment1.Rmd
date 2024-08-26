@@ -44,31 +44,49 @@ blended <- blended_raw %>%
   mutate(prob = softmax(5 * cdf)) %>%
   ungroup() %>%
   right_join(d_exp1, relationship = "many-to-many") %>%
-  group_by(Level, bias_weight, step) %>%
+  filter(!is.na(bias_weight)) %>%
+  group_by(bias_weight, step) %>%
   summarize(loglik = sum(log(prob), na.rm = TRUE))
 
 blended %>%
-  filter(!is.na(bias_weight)) %>%
-  group_by(Level) %>%
+  ungroup() %>%
   filter(loglik == max(loglik))
 ```
 
 ```{r}
 blended %>%
   ggplot(aes(x = as.numeric(step), y = loglik,
-             color = bias_weight, group = bias_weight,
-             linetype = bias_weight %in% c(0,1))) +
-    geom_line() +
-    facet_grid(Level ~ ., scales = 'free') +
+             color = bias_weight, group = bias_weight)) +
+    geom_line(aes(linetype = bias_weight %in% c(0,1)), 
+              show.legend = c(colour = TRUE, linetype = FALSE)) +
+#    facet_wrap(Level ~ ., scales = 'free') +
     scale_x_log10() +
-    ylim(NA, -4000) +
     theme_few() +
-    labs(x = "search budget") +
+    labs(x = "search budget", y = "log likelihood", color = "bias") +
     theme(aspect.ratio = 1, legend.position = 'right')
 
 ggsave('blended.pdf', height = 15, width = 15)
 ```
 
+## examine CDFs
+
+```{r}
+blended_raw %>%
+  right_join(d_exp1, relationship = "many-to-many") %>%
+  distinct() %>%
+  filter(wordpair == 'lion-tiger') %>%
+  ggplot(aes(x = as.numeric(step), y = cdf, group = correctedClue,
+             linetype = correctedClue %in% c('cat', 'animal'))) +
+    geom_line() +
+    facet_wrap(bias_weight ~ ., scales = 'free') +
+    scale_x_log10() +
+#    ylim(0, 1) +
+    theme_few() +
+    labs(x = "search budget") +
+    theme(aspect.ratio = 1, legend.position = 'none')
+
+ggsave('blended.pdf', height = 15, width = 15)
+```
 
 # 1. speaker selections
 
