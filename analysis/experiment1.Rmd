@@ -41,11 +41,11 @@ blended_raw <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
 ```{r}
 blended <- blended_raw %>%
   group_by(wordpair, step,  bias_weight) %>%
-  mutate(prob = softmax(5 * cdf)) %>%
+  mutate(prob = softmax(6 * cdf)) %>%
   ungroup() %>%
   right_join(d_exp1, relationship = "many-to-many") %>%
   filter(!is.na(bias_weight)) %>%
-  group_by(bias_weight, step) %>%
+  group_by(Level, bias_weight, step) %>%
   summarize(loglik = sum(log(prob), na.rm = TRUE))
 
 blended %>%
@@ -57,9 +57,10 @@ blended %>%
 blended %>%
   ggplot(aes(x = as.numeric(step), y = loglik,
              color = bias_weight, group = bias_weight)) +
-    geom_line(aes(linetype = bias_weight %in% c(0,1)), 
-              show.legend = c(colour = TRUE, linetype = FALSE)) +
-#    facet_wrap(Level ~ ., scales = 'free') +
+    geom_line(aes(linetype = bias_weight %in% c(0,1), 
+                  alpha = bias_weight %in% c(0, 0.01, 1)), 
+              show.legend = c(colour = TRUE, linetype = FALSE, alpha=FALSE)) +
+    facet_wrap(Level ~ ., scales = 'free') +
     scale_x_log10() +
     theme_few() +
     labs(x = "search budget", y = "log likelihood", color = "bias") +
