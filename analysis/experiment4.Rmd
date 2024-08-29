@@ -508,12 +508,12 @@ df.mixture <- read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>%
 
 ```{r}
 bind_rows(
-  read_csv(here("data/exp2/model_output/ranks.csv"))  %>% mutate(src = 'empirical'),
-  read_csv(here("data/exp2/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
+  read_csv(here("data/exp4/model_output/ranks.csv"))  %>% mutate(src = 'empirical'),
+  read_csv(here("data/exp4/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
-  left_join(read_csv(here("data/exp2/model_output/freq_scores.csv")) %>% mutate(src = 'empirical'), 
+  left_join(read_csv(here("data/exp4/model_output/freq_scores.csv")) %>% mutate(src = 'empirical'), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>% 
-  left_join(read_csv(here("data/exp2/model_output/mixture_scores.csv")) %>% 
+  left_join(read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
               mutate(src = 'empirical')  %>% filter(alpha == 1.0), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>%
   filter(correctedClue %in% (vocab %>% pull(Word))) %>%
@@ -552,7 +552,7 @@ ggsave("../analysis/plots/exp4_ranks.pdf", width = 6, height = 4, units = 'in')
 ## Examine mixture scores
 
 ```{r}
-read_csv(here("data/exp2/model_output/mixture_scores.csv")) %>% 
+read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
   mutate(src = 'empirical')%>%
   select(-Level) %>%
   left_join(d.levels) %>%
@@ -585,8 +585,8 @@ ggsave("../analysis/plots/exp2_ranks_mixture.pdf", width = 6, height = 4, units 
 
 ```{r}
 d.scores <- bind_rows(
-  read_csv(here("data/exp2/model_output/scores.csv")) %>% mutate(src = 'empirical'),
-  read_csv(here("data/exp2/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
+  read_csv(here("data/exp4/model_output/scores.csv")) %>% mutate(src = 'empirical'),
+  read_csv(here("data/exp4/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
   filter(seqOrder %in% c('clueFinal', 'clueOption1', 'clueOption2', 'clueOption3')) %>%
   gather(budget, value, union_2:w2_8192) %>%
@@ -620,21 +620,21 @@ ggsave("../analysis/plots/exp4_scores.pdf", width = 6, height = 4, units = 'in')
 ## data organization
 
 ```{r}
-targets = read_csv(here("../data/exp2/targets.csv"))
-cleaned = read_csv(here("../data/exp2/cleaned.csv")) %>%
+targets = read_csv(here("../data/exp4/targets.csv"))
+cleaned = read_csv(here("../data/exp4/cleaned.csv")) %>%
   left_join(targets)
 
 cleaned_final = cleaned %>% filter(seqOrder == "clueFinal")
 
-write.csv(cleaned_final, file = "../data/exp2/cleaned_clueFinal.csv", row.names = FALSE)
+write.csv(cleaned_final, file = "../data/exp4/cleaned_clueFinal.csv", row.names = FALSE)
 
-cdf = read_csv(here("../data/exp2/model_output/freqs_long.csv"))
+cdf = read_csv(here("../data/exp4/model_output/freqs_long.csv"))
 
 head(cdf)
 
-cleaned_complete = read_csv(here("../data/exp2/cleaned_complete.csv")) 
+cleaned_complete = read_csv(here("../data/exp4/cleaned_complete.csv")) 
 candidates = cleaned_complete %>% filter(seqOrder != "clueFinal")
-write.csv(candidates, file = "../data/exp2/cleaned_candidates.csv", row.names = FALSE)
+write.csv(candidates, file = "../data/exp4/cleaned_candidates.csv", row.names = FALSE)
 ```
 
 <!-- ## Recode Levels -->
