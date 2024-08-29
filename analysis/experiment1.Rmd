@@ -1,9 +1,14 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "Experiment 1 (Full Two-player Connector)"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+editor_options: 
+  chunk_output_type: console
 ---
 
-# Imports
+# imports
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
@@ -12,13 +17,120 @@ library(ggthemes)
 library(tidyboot)
 library(here)
 library(jsonlite)
-
-d_exp1 <- read_csv(here("data/exp1/cleaned.csv")) %>%
-  mutate(Level = fct_collapse(Level, Hard = c("Medium", "Hard")))
-
 ```
 
-# 0. blended model
+# speaker selections
+
+```{r}
+
+exp1_speaker_df <- read_csv(here("../data/exp1/model_output/speaker_df.csv"))
+
+# recompute levels based on listener accuracy
+
+listener = read_csv(here("../data/exp1/raw_listener.csv")) %>%
+  unite("wordpair", Word1, Word2, sep = "-") %>% 
+  group_by(wordpair) %>%
+  summarise(accuracy = mean(Player2.ACC),
+            speakerRT = mean(Player1.RT))%>%
+  mutate(listener_tertile = ntile(accuracy, 3),
+         speaker_tertile = ntile(speakerRT,3)) %>%
+  mutate(Level = ifelse(speaker_tertile == 1, "Easy", ifelse(speaker_tertile == 2, "Medium", "Hard")))
+
+car::Anova(lm(data=listener, accuracy ~ Level))
+listener %>% group_by(Level) %>% summarise(mean(accuracy))
+
+speaker = exp1_speaker_df %>% select(-Level) %>%
+  left_join(listener %>% select(wordpair, Level)) %>%
+  mutate(Level = as.factor(Level)) %>%
+  mutate(Level = fct_relevel(Level, "Easy", "Medium", "Hard"))
+```
+
+# specific wordpair-level parameters
+```{r}
+wordpair_params = speaker %>% group_by(wordpair) %>% 
+  mutate(LL = log(prob)) %>%
+  group_by(wordpair, Level, model, alpha, cost_fn, costweight) %>%
+  summarise(sumLL = sum(LL, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(wordpair) %>%
+  filter(sumLL == max(sumLL))
+```
+
+# model comparison plot
+```{r}
+beste1_models = speaker %>%
+  filter(model %in% c("RSAcdf", "RSAfreq"))%>%
+  mutate(type = ifelse(costweight == 0, "no search",
+          ifelse(costweight == 1, "no pragmatics","search + pragmatics"))) %>%
+  mutate(LL = log(prob)) %>%
+  group_by(type, Level, model, alpha, cost_fn, costweight) %>%
+  summarise(sumLL = sum(LL, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(type,Level, cost_fn ) %>%
+  filter(sumLL == max(sumLL))
+
+beste1_models %>%
+  ggplot(aes(x = as.numeric(cost_fn), y = sumLL)) +
+  geom_line(stat = 'identity', data = . %>% filter(model == 'RSAcdf'),
+            aes(group = type, color = type)) +
+  geom_hline(aes(yintercept = sumLL, color = type), 
+             linetype = 'dashed', 
+             data = . %>% filter(model == 'RSAfreq' & type != "no search")) +
+  geom_point(data = . %>% group_by(Level) %>% filter(sumLL == max(sumLL)))+
+  facet_wrap(~ Level, scales = 'free')+
+  scale_x_log10(limits = c(1, 10000)) +
+  scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    theme_few() +
+    labs(x = "search budget") +
+    theme(aspect.ratio = 1)
+
+ggsave(here('plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width = 10)
+```
+
+# table 2 results
+```{r}
+View(beste1_models %>%
+       mutate(type = as.factor(type)) %>%
+       mutate(type = fct_relevel(type, "search + pragmatics", "no pragmatics", "no search")) %>%
+       filter(model == "RSAcdf") %>%
+  group_by(Level,type, model) %>%
+  filter(sumLL == max(sumLL)) %>%
+  arrange(Level, model) %>%
+    slice_head()) 
+```
+# cost heatmap
+```{r}
+speaker %>%
+  filter(model == "RSAcdf") %>%
+  mutate(modeltype = ifelse(costweight == 1, "no pragmatics",
+          ifelse(costweight == 0, "no search", "search + pragmatics"))) %>%
+  filter(modeltype != "no search") %>%
+  group_by(modeltype, Level, model, alpha, cost_fn, costweight) %>%
+  summarize(loglik = sum(log(prob), na.rm = T)) %>%
+  rename(budget = cost_fn) %>% 
+  group_by(Level, modeltype, budget, costweight) %>%
+  #mutate(loglik = ifelse(loglik < -5000, -5000, loglik)) %>%
+  filter(loglik == max(loglik)) %>%
+  ungroup() %>%
+  # complete(Level, modeltype, budget, costweight, fill = list(loglik = NA)) %>%
+  # group_by(Level, modeltype, costweight) %>%
+  # mutate(loglik = ifelse(is.na(loglik), mean(loglik, na.rm = T), loglik)) %>%
+  ggplot(aes(x = costweight, y = as.numeric(budget), fill = loglik)) +
+    geom_tile(stat = 'identity', height=.34, width=.33) +
+    geom_tile(color = 'black', stat = 'identity', height=.34, width=.33, size = 1.1,
+              data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
+    facet_grid(Level ~ modeltype) +
+    scale_x_log10() +
+    scale_y_log10() +
+    scale_fill_gradient2(midpoint = -4250) +
+    theme_few() +
+    labs(y = "search budget", "cost weight") +
+    theme(aspect.ratio = 1)
+
+ggsave(here("plots/exp1_heatmap.pdf"), units = 'in', width = 6, height = 5)
+```
+
+# blended model
 
 ```{r}
 logsumexp <- function(x) {
@@ -89,118 +201,60 @@ blended_raw %>%
 ggsave('blended.pdf', height = 15, width = 15)
 ```
 
-# 1. speaker selections
 
-```{r}
-d.exp1 <- read_csv(here("data/exp1/cleaned.csv"))
+<!-- ## OTHER CODE -->
 
-likelihoods <- read_csv(here("data/exp1/model_output/speaker_df.csv")) %>%
-  select(model, wordpair, alpha, costweight, distweight, correctedClue, Level, cost_fn, prob) %>%
-  mutate(Level = fct_relevel(Level, 'Easy', 'Medium', 'Hard')) 
-```
+<!-- ## Compute costs for the whole vocab -->
 
-```{r}
-likelihoods %>%
-  group_by(cost_fn, model, alpha, distweight, costweight, Level) %>%
-  summarize(loglik = sum(log(prob), na.rm = T)) %>%
-  group_by(model, Level, cost_fn) %>%
-  filter(loglik == max(loglik)) %>%
-  ggplot(aes(x = as.numeric(cost_fn), y = loglik, color = Level)) +
-    geom_line(stat = 'identity', data = . %>% filter(model == 'additivecdf'), alpha = 0.5) +
-    geom_hline(aes(yintercept = loglik, color = Level), linetype = 'dashed', data = . %>% filter(model == 'additivefreq')) +
-    geom_line(linetype = 'dotted', data = . %>% filter(model == 'no_pragcdf')) +
-    geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
-    facet_wrap(~ Level, scales = 'free') +
-    scale_x_log10(limits = c(1, 10000)) +
-    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
-    theme_few() +
-    labs(x = "search budget") +
-    theme(aspect.ratio = 1, legend.position = 'none')
+<!-- ```{r} -->
+<!-- pairs <- d.exp1 %>% pull(wordpair) %>% unique() -->
 
-ggsave(here('analysis/plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width = 7)
-```
+<!-- getWalks <- function(pair) { -->
+<!--   paste0('data/exp1/model_output/', pair, '-walks.json', collapse = '') %>% -->
+<!--     here() %>% -->
+<!--     fromJSON() %>%  -->
+<!--     as_tibble() %>% -->
+<!--     mutate(step = row_number()) %>% -->
+<!--     gather(walk, Word, -step) %>% -->
+<!--     mutate(walk = gsub('walk-', '', walk), -->
+<!--            wordpair = pair) %>%  -->
+<!--     group_by(walk, Word, wordpair) %>% -->
+<!--     filter(step == first(step)) %>% -->
+<!--     group_by(step, Word, wordpair) %>% -->
+<!--     tally() %>% -->
+<!--     ungroup() %>% -->
+<!--     group_by(wordpair) %>% -->
+<!--     complete(Word, step = 2**seq(13), fill = list(n=0)) %>% -->
+<!--     group_by(Word, wordpair) %>% -->
+<!--     arrange(step) %>% -->
+<!--     mutate(cdf = cumsum(n)/2000) %>% -->
+<!--     filter(step %in% 2**seq(13)) %>% -->
+<!--     write_csv(here(paste0('data/exp1/model_output/', pair, '-cdf.csv',collapse = ''))) -->
+<!-- } -->
 
-Broken out by difficulty
+<!-- library(furrr) -->
+<!-- library(progressr) -->
 
-```{r}
-library(xtable)
-likelihoods %>%
-  group_by(Level, model, cost_fn, alpha, costweight, distweight) %>%
-  summarize(loglik = sum(log(prob), na.rm = T)) %>%
-  group_by(model, Level) %>%
-  filter(loglik == max(loglik)) %>%
-  arrange(Level, -loglik) %>%
-  xtable()
-  
-```
+<!-- plan(multisession, workers = 8) -->
+<!-- cdfs <- with_progress({ -->
+<!--     p <- progressor(steps = length(pairs)) -->
+<!--     future_walk(pairs, ~{p(); getWalks(.x)})  -->
+<!-- }) -->
+<!-- ``` -->
 
+<!-- # Reformat -->
 
+<!-- ```{r} -->
+<!-- complete_df <- read_csv(here('data/exp1/model_input/vocab.csv')) %>% -->
+<!--   left_join(read_csv(here('data/exp1/model_output/ranks.csv'))) %>% -->
+<!--   mutate(single = (w1_index_walk + w2_index_walk)/2) %>% -->
+<!--   select(-`...1`, -index, -Occurrences,-Length) %>% -->
+<!--   gather(measure, value, -Word, -wordpair) %>% -->
+<!--   complete(Word, wordpair, measure, fill = list(value = 0)) %>% -->
+<!--   filter(!is.na(step), !is.na(wordpair)) -->
 
-```{r}
-d.toplot <- likelihoods %>%
-  filter(costweight %in% c(0, .01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1)) %>%
-  group_by(cost_fn, model, alpha, distweight, costweight, Level) %>%
-  summarize(loglik = sum(log(prob), na.rm = T)) %>%
-  group_by(Level, model, costweight) %>%
-  filter(loglik == max(loglik)) 
-
-d.toplot %>%
-  ggplot(aes(x = costweight, y = loglik, linetype = model, color = Level)) +
-    geom_line() +
-    facet_grid( ~ Level, scales = 'free') +
-    scale_x_log10() +
-    geom_point(data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
-    scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
-    scale_linetype_manual(values = c('solid', 'dashed', 'dotted')) +
-    theme_few() +
-    labs(x = "cost weight") +
-    theme(aspect.ratio = 1, legend.position = 'top')
-
-ggsave(here('analysis/plots/exp1_costscale.pdf'), units = 'in', height = 3, width = 7)
-```
-
-
-```{r}
-likelihoods %>%
-  filter(costweight %in% c(0, .01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1)) %>%
-  group_by(cost_fn, model, alpha, distweight, costweight, Level) %>%
-  summarize(loglik = sum(log(prob), na.rm = T)) %>%
-  rename(budget = cost_fn) %>% 
-  group_by(Level, model, budget, costweight) %>%
-  mutate(loglik = ifelse(loglik < -5000, -5000, loglik)) %>%
-  filter(loglik == max(loglik)) %>%
-  ungroup() %>%
-  complete(Level, model, budget, costweight, fill = list(loglik = NA)) %>%
-  group_by(Level, model, costweight) %>%
-  mutate(loglik = ifelse(is.na(loglik), mean(loglik, na.rm = T), loglik)) %>%
-  ggplot(aes(x = costweight, y = as.numeric(budget), fill = loglik)) +
-    geom_tile(stat = 'identity', height=.34, width=.33) +
-    geom_tile(color = 'black', stat = 'identity', height=.34, width=.33, size = 1.1,
-              data = . %>% group_by(Level, model) %>% filter(loglik == max(loglik))) +
-    facet_grid(Level ~ model) +
-    scale_x_log10() +
-    scale_y_log10() +
-    scale_fill_gradient2(midpoint = -4250) +
-    theme_few() +
-    labs(y = "search budget", "cost weight") +
-    theme(aspect.ratio = 1)
-
-ggsave(here("analysis/plots/exp1_heatmap.pdf"), units = 'in', width = 6, height = 5)
-```
-
-# Reformat
-
-```{r}
-complete_df <- read_csv(here('data/exp1/model_input/vocab.csv')) %>%
-  left_join(read_csv(here('data/exp1/model_output/ranks.csv'))) %>%
-  mutate(single = (w1_index_walk + w2_index_walk)/2) %>%
-  select(-`...1`, -index, -Occurrences,-Length) %>%
-  gather(measure, value, -Word, -wordpair) %>%
-  complete(Word, wordpair, measure, fill = list(value = 0)) %>%
-  filter(!is.na(step), !is.na(wordpair))
-
-read_csv(here('data/exp1/model_input/vocab.csv')) %>%
-  left_join(complete_df) %>%
-  select(Word,wordpair,measure,value) %>%
-  write_csv(here('data/exp1/model_output/freqs_long.csv'))
-```
+<!-- read_csv(here('data/exp1/model_input/vocab.csv')) %>% -->
+<!--   left_join(complete_df) %>% -->
+<!--   select(Word,wordpair,measure,value) %>% -->
+<!--   write_csv(here('data/exp1/model_output/freqs_long.csv')) -->
+<!-- ``` -->

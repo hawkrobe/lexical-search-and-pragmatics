@@ -1,0 +1,13 @@
+{
+        "board1": ["bench", "glow", "sunny", "idiot", "quick", "analyze", "beam", "cave", "oak", "red", "robin", "tree", "firm", "cut", "run", "knight", "trim", "site", "bird", "month"],
+        "board2": ["plant", "lace", "tip", "tent", "arrow", "post", "sun", "silver", "above", "blue", "host", "loose", "gold", "stern", "cup", "wind", "bowl", "lunch", "below", "bow"],
+        "board3": ["mild", "shine", "gray", "gums", "luck", "paper", "rude", "lane", "holy", "road", "jam", "hammer", "regret", "chip", "teeth", "fairy", "tiny", "tool", "bulb", "kind"],
+        "board4": ["gun", "halo", "jump", "give", "hope", "travel", "poor", "dream", "spoon", "glue", "angel", "weak", "leap", "chief", "ankle", "paste", "usual", "bet", "path", "fork"],
+        "board5": ["tiger", "exam", "bun", "trace", "hand", "storm", "snake", "alarm", "bear", "house", "birth", "test", "dead", "fresh", "alive", "tower", "pork", "ash", "lion", "hell"],
+        "board6": ["sit", "pine", "white", "ideal", "crust", "flour", "rock", "lemon", "elm", "found", "river", "lost", "flat", "chain", "fill", "stand", "tear", "exact", "boot", "clever"],
+        "board7": ["heavy", "east", "wood", "dim", "new", "glass", "heart", "full", "timber", "love", "soft", "meter", "empty", "hard", "old", "cage", "worn", "kitchen", "short", "boots"],
+        "board8": ["pen", "land", "icing", "happy", "horn", "drum", "floor", "ride", "tall", "giant", "rural", "fine", "tile", "style", "cake", "sugar", "army", "sad", "subtle", "acre"],
+        "board9": ["male", "happen", "king", "candle", "toe", "hammock", "silly", "trauma", "rage", "weird", "real", "sleep", "fly", "wick", "guest", "anger", "olive", "skirt", "sore", "layer"],
+        "board10": ["feet", "chair", "fire", "ship", "late", "list", "gas", "dune", "sand", "boss", "table", "ring", "blaze", "garage", "chapel", "early", "pure", "dope", "aware", "bone"]
+    }
+    
