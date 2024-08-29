@@ -15,6 +15,7 @@ library(ggthemes)
 library(tidyboot)
 library(here)
 library(jsonlite)
+library(lme4)
 ```
 
 ## Vocab
@@ -104,9 +105,10 @@ nobs(wordpair_model)
 ```
 
 
-## suppression
 
-comparing the influence of different distractors on the board and whether some candidates are suppressed eventually
+## order effects
+
+### plot
 
 ```{r}
 exp4_complete <- read_csv(here("../data/exp4/cleaned_complete.csv")) %>%
@@ -114,43 +116,6 @@ exp4_complete <- read_csv(here("../data/exp4/cleaned_complete.csv")) %>%
   select(-Level) %>%
   left_join(exp4_newlevels %>% select(wordpair, level))
   
-suppression_data =exp4_complete %>%
-  pivot_wider(names_from = seqOrder, values_from = correctedClue) %>%
-  mutate(suppress = ifelse(!clueFinal %in% c(clueOption1), 1, 0))
-  
-  
-
-## suppression rate plot
-
-suppression_data %>%
-  mutate(level = fct_relevel(level, "Easy", "Medium", "Hard")) %>%
-  group_by(level) %>% 
-  tidyboot_mean(suppress, nboot = 1000, na.rm = T) %>% 
-  ggplot(aes(x = level, y = empirical_stat, fill = level)) +
-    geom_bar(stat = 'identity') +
-    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.05) +
-    # geom_point(data = num_items, aes(x= Group, y = count, group = Group),
-    #            position = position_jitterdodge(0.1), alpha = 0.3)+
-    labs(y = 'suppression rate', x = "") +
-    theme_few() +
-    scale_fill_few() +
-    theme(aspect.ratio = 1, legend.position = 'none')
-## difficulty model
-
-suppression_model = glmer(data = suppression_data, 
-                         suppress ~ level + (1|clueGiverID), 
-                         family = binomial ,control=glmerControl(optimizer="optimx",
-                                 optCtrl=list(method='nlminb')))
-nobs(suppression_model)
-car::Anova(suppression_model)
-emmeans::emmeans(suppression_model, pairwise ~ level, adjust = "tukey")
-```
-
-## order effects
-
-### plot
-
-```{r}
 d.order <- exp4_complete %>%
   filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   spread(seqOrder, correctedClue) %>%
@@ -172,13 +137,25 @@ d.order %>%
     labs(y = 'proportion matching final clue', x = '') +
     theme(aspect.ratio = 1)
 
-#ggsave(here('analysis/plots/order.pdf'), units = 'in', width = 4, height = 3)
+ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 3)
 ```
 ### by seqOrder
 ```{r}
 d.order %>%
   group_by(seqOrder) %>%
   summarize(m = mean(match, na.rm = T))
+```
+### model for seqOrder
+```{r}
+d.order %>%
+  glmer(match ~ seqOrder + 
+               (1 + seqOrder | clueGiverID) ,
+        data = ., 
+        family = 'binomial',
+        contrasts = list(seqOrder = contr.treatment(3, base = 2)),
+        control=glmerControl(optimizer="optimx",
+                                 optCtrl=list(method='nlminb'))) %>%
+  summary()
 ```
 ### by level
 ```{r}
@@ -200,18 +177,7 @@ d.order %>%
                                  optCtrl=list(method='nlminb'))) %>%
   car::Anova()
 ```
-### model for seqOrder
-```{r}
-d.order %>%
-  glmer(match ~ seqOrder + 
-               (1 + seqOrder | clueGiverID) ,
-        data = ., 
-        family = 'binomial',
-        contrasts = list(seqOrder = contr.treatment(3, base = 2)),
-        control=glmerControl(optimizer="optimx",
-                                 optCtrl=list(method='nlminb'))) %>%
-  summary()
-```
+
 
 ### associated with accuracy?
 
@@ -241,14 +207,40 @@ d.order %>%
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
     scale_fill_grey(name = "order", start=1, end=0.2) + 
     labs(y = '% selected as clue', x = 'accuracy') +
-    theme(aspect.ratio = 2, legend.position = 'none') +
+    theme( legend.position = 'none') +
     ylim(0,1)
 
 ggsave(here('plots/exp4_order_difficulty.pdf'), 
-       units = 'in', width = 4.5, height = 3)
+       units = 'in', width = 6, height = 3)
 ```
 
-## qualitative analyses
+## suppression and qualitative analyses
+
+comparing the influence of different distractors on the board and whether some candidates are suppressed eventually
+
+```{r}
+
+suppression_data =exp4_complete %>%
+  pivot_wider(names_from = seqOrder, values_from = correctedClue) %>%
+  mutate(suppress = ifelse(!clueFinal %in% c(clueOption1), 1, 0))
+
+## suppression rate plot
+
+suppression_data %>%
+  mutate(level = fct_relevel(level, "Easy", "Medium", "Hard")) %>%
+  group_by(level) %>% 
+  summarize(mean = mean(suppress))
+
+## difficulty model
+
+suppression_model = glmer(data = suppression_data, 
+                         suppress ~ level + (1|clueGiverID), 
+                         family = binomial ,control=glmerControl(optimizer="optimx",
+                                 optCtrl=list(method='nlminb')))
+nobs(suppression_model)
+car::Anova(suppression_model)
+emmeans::emmeans(suppression_model, pairwise ~ level, adjust = "tukey")
+```
 
 #### examples
 
@@ -300,7 +292,7 @@ critical_pair = c("WEIRD-TRAUMA", "TRAUMA-WEIRD")
 clueCounts = all_exps %>% filter(wordpair %in% critical_pair) %>%
   mutate(wordpair = ifelse(wordpair == "WEIRD-TRAUMA", "TRAUMA-WEIRD", wordpair))%>%
   group_by(exp, seqOrder, wordpair, correctedClue) %>% count() %>%
-  #filter(n > 1) %>%
+  filter(n > 1) %>%
   mutate(exp = as.factor(exp), wordpair = as.factor(wordpair)) %>%
   mutate(exp = fct_recode(exp, E1 = "exp1", `E3 (no board)` = "exp3", 
                           `E4 (candidates)` = "exp4-candidates", `E4 (final)` = "exp4")) %>%
@@ -356,11 +348,10 @@ clueCounts = all_exps %>% filter(wordpair %in% critical_pair) %>%
 ifelse(correctedClue == "dead", "death",
        ifelse(correctedClue == "deadly", "death",correctedClue)))))))))%>%
   group_by(exp, seqOrder, wordpair, correctedClue) %>% count() %>%
-  filter(n > 2) %>%
   mutate(exp = as.factor(exp), wordpair = as.factor(wordpair)) %>%
-  mutate(exp = fct_recode(exp, E1 = "exp1", `E3 (no board)` = "exp3", 
-                          `E4 (candidates)` = "exp4-candidates", `E4 (final)` = "exp4")) %>%
-  mutate(exp = fct_relevel(exp, "E1", "E3 (no board)", "E4 (candidates)", "E4 (final)"))
+  mutate(exp = fct_recode(exp, E1 = "exp1", `E3\n(no board)` = "exp3", 
+                          `E4\n(candidates)` = "exp4-candidates", `E4\n(final)` = "exp4")) %>%
+  mutate(exp = fct_relevel(exp, "E1", "E3\n(no board)", "E4\n(candidates)", "E4\n(final)"))
 
 totals = clueCounts %>% group_by(exp, seqOrder, wordpair) %>%
   summarise(total = sum(n))
@@ -374,26 +365,68 @@ clueCounts = clueCounts %>% left_join(totals)%>%
 clueCounts %>% group_by(exp, seqOrder) %>% summarise(sum = sum(prop))
 
 clueCounts %>%
-  ggplot(aes(x = exp, y = prop, group = correctedClue, fill = correctedClue))+
-  geom_col() +
-  geom_text(aes(label = paste(correctedClue, round(prop,2), sep = ":")), 
-            position = position_stack(vjust = 0.25), size = 7) +  
-  theme_classic()+
-  theme(legend.position = "none")+
-  facet_wrap(~wordpair)+
+  mutate(pairClue = paste(wordpair, correctedClue, sep = "-")) %>%
+  filter(pairClue %in% c("LION-TIGER-animal", "LION-TIGER-cat"
+                         , "LION-TIGER-feline")) %>%
+  ggplot(aes(x = exp, y = prop, group = correctedClue, color = correctedClue)) +
+  geom_line() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  facet_wrap(~wordpair) +
+  scale_color_manual(values = c("coral", "forestgreen", "chartreuse3"))+
   labs(title = "", y = "utterance proportion", x = "") +
   theme(
-    legend.position = "none", 
-    panel.border = element_blank(),   
-    panel.background = element_blank(), 
+    panel.border = element_blank(),
+    panel.background = element_blank(),
     plot.background = element_blank(),
     axis.text.x = element_text(size=16),
     axis.title.y = element_text(size=16),
     strip.text = element_text(size = 12, face = "bold", color = "white"),
     strip.background = element_rect(color = "black", fill = "darkgray")
-  )
+  ) +
+  # Add labels at the last point for each correctedClue
+  geom_text(data = . %>%
+              group_by(correctedClue, wordpair) %>%
+              filter(exp == "E4\n(final)"),
+            aes(label = correctedClue),
+            hjust = -0.3,  # Slightly adjust the horizontal position
+            size = 5,
+            vjust = -0.3)      # Adjust the size of the text
 
-ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 7, width =15)
+ggsave('plots/exp4_lion_tiger.pdf', units = 'in', height = 5, width =6)
+
+
+clueCounts %>%
+  mutate(pairClue = paste(wordpair, correctedClue, sep = "-")) %>%
+  filter(pairClue %in% c("SNAKE-ASH-death","SNAKE-ASH-poison",
+                         "SNAKE-ASH-burn", "SNAKE-ASH-reptile")) %>%
+  ggplot(aes(x = exp, y = prop, group = correctedClue, color = correctedClue)) +
+  geom_line() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  facet_wrap(~wordpair) +
+  scale_color_manual(values = c(  "coral","coral4", "forestgreen", "chartreuse3"))+
+  labs(title = "", y = "utterance proportion", x = "") +
+  theme(
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_blank(),
+    axis.text.x = element_text(size=16),
+    axis.title.y = element_text(size=16),
+    strip.text = element_text(size = 12, face = "bold", color = "white"),
+    strip.background = element_rect(color = "black", fill = "darkgray")
+  ) +
+  # Add labels at the last point for each correctedClue
+  geom_text(data = . %>%
+              group_by(correctedClue, wordpair) %>%
+              filter(exp == "E4\n(final)"),
+            aes(label = correctedClue),
+            hjust = -0.3,  # Slightly adjust the horizontal position
+            size = 5,
+            vjust = -0.3)      # Adjust the size of the text
+
+
+ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
 ```
 
 # Model results
@@ -442,7 +475,7 @@ bind_rows(
     facet_wrap(~ wordpair) +
     scale_x_log10(limits = c(2,20000))
 
-ggsave(here(paste0('plots/cdf-duo.pdf')), units='in', height = 4, width = 8)
+#ggsave(here(paste0('plots/cdf-duo.pdf')), units='in', height = 4, width = 8)
 ```
 
 Statistics
@@ -482,7 +515,7 @@ d.spearmancor.toplot %>%
     scale_x_log10() +
     theme(aspect.ratio = 1)
 
-ggsave(here('analysis/plots/exp4-spearman-broken-out.pdf'), units = 'in', width = 8, height = 4)
+#ggsave(here('analysis/plots/exp4-spearman-broken-out.pdf'), units = 'in', width = 8, height = 4)
 ```
 
 ```{r}
@@ -546,7 +579,7 @@ bind_rows(
     labs(x = '', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
-ggsave("../analysis/plots/exp4_ranks.pdf", width = 6, height = 4, units = 'in')
+#ggsave("../analysis/plots/exp4_ranks.pdf", width = 6, height = 4, units = 'in')
 ```
 
 ## Examine mixture scores
@@ -578,7 +611,7 @@ read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>%
     labs(x = 'alpha', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
-ggsave("../analysis/plots/exp2_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
+#ggsave("../analysis/plots/exp2_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
 ```
 
 ## Examine walk scores
@@ -613,7 +646,7 @@ d.scores %>%
     labs(x = 'budget', y = 'P(visit)') +
     theme(aspect.ratio = 2)
 
-ggsave("../analysis/plots/exp4_scores.pdf", width = 6, height = 4, units = 'in')
+#ggsave("../analysis/plots/exp4_scores.pdf", width = 6, height = 4, units = 'in')
 ```
 
 # SUPPLEMENTARY (might delete eventually)
@@ -715,7 +748,7 @@ d.raw %>% group_by(level) %>% tidyboot_mean(TEOption1, nboot = 1000, na.rm = T) 
     theme(aspect.ratio = 1, legend.position = 'none') +
     scale_fill_manual(values = c('#60BD68', '#D8CF23', '#CC253D'))
 
-ggsave(here('analysis/plots/generation_time.pdf'), units = 'in', width = 4, height = 4)
+#ggsave(here('analysis/plots/generation_time.pdf'), units = 'in', width = 4, height = 4)
 ```
 
 ```{r}
