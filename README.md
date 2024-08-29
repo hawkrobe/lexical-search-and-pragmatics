@@ -10,4 +10,4 @@ conda activate connector
 conda env list
 ```
 
-2. Download the data .zip from [here]()
+2. Download the data files from the [OSF repositoy](https://osf.io/xq2s3/) and store them inside the relevant experiment subfolders (e.g., `data/exp1/model_output/`).
