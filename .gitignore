@@ -1,7 +1,8 @@
 .DS_Store
-/analysis/plots/
 /data/exp1/model_output
 /data/exp2/model_output
+/data/exp3/model_output
+/data/exp4/model_output
 swow_embeddings.csv
 cdfs_long.csv
 *.gpickle
