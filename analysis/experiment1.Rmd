@@ -81,7 +81,7 @@ beste1_models %>%
   scale_x_log10(limits = c(1, 10000)) +
   scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
     theme_few() +
-    labs(x = "search budget") +
+    labs(x = "search budget", y = "log likelihood") +
     theme(aspect.ratio = 1)
 
 ggsave(here('plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width = 10)
@@ -89,15 +89,98 @@ ggsave(here('plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width =
 
 # table 2 results
 ```{r}
-View(beste1_models %>%
+
+best_models_df = beste1_models %>%
        mutate(type = as.factor(type)) %>%
        mutate(type = fct_relevel(type, "search + pragmatics", "no pragmatics", "no search")) %>%
-       filter(model == "RSAcdf") %>%
+       filter(model == "RSAcdf" | 
+                (model == 'RSAfreq' & type != "no search")) %>%
   group_by(Level,type, model) %>%
   filter(sumLL == max(sumLL)) %>%
   arrange(Level, model) %>%
-    slice_head()) 
+    slice_head()
+
+View(best_models_df) 
 ```
+
+# ratio tests
+
+```{r}
+
+key_comparison_models = best_models_df %>% 
+  filter(type == "search + pragmatics" | 
+    (type == "no pragmatics" & model == "RSAcdf" ) |
+      (type == "no search"))
+  
+filtered_df <- inner_join(speaker, key_comparison_models, 
+                by = c("Level", "model", "alpha", "cost_fn", "costweight")) %>%
+  mutate(type = ifelse(costweight == 0, "no search",
+          ifelse(costweight == 1, "no pragmatics","search + pragmatics"))) %>%
+  unite("key", c(type, model), sep = "-")
+
+## verify 
+filtered_df %>% 
+  group_by(Level, key) %>%
+  summarise(sumLL = sum(log(prob), na.rm = TRUE))
+## declare functions
+calculate_log_likelihood <- function(data) {
+  data %>%
+    group_by(key) %>%
+    summarize(log_likelihood = sum(log(prob), na.rm = TRUE)) %>%
+    ungroup()
+}
+
+perform_lrt <- function(log_likelihood1, log_likelihood2, df = 1) {
+  # Compute the likelihood ratio test statistic
+  lr_statistic <- -2 * (log_likelihood1 - log_likelihood2)
+  # Compute the p-value
+  p_value <- pchisq(lr_statistic, df = df, lower.tail = FALSE)
+  
+  return(list(lr_statistic = lr_statistic, p_value = p_value))
+}
+
+# Function to compare models for each level
+compare_models_by_level <- function(data) {
+  log_likelihoods <- calculate_log_likelihood(data)
+  
+  # Perform pairwise LRTs between models
+  full_vs_freq <-  perform_lrt(log_likelihoods %>% 
+                  filter(key == "search + pragmatics-RSAfreq") %>% pull(log_likelihood),
+                                  log_likelihoods%>% 
+                filter(key == "search + pragmatics-RSAcdf") %>% pull (log_likelihood))
+  
+  full_vs_nosearch <-  perform_lrt(log_likelihoods %>% 
+                  filter(key == "no search-RSAcdf") %>% pull(log_likelihood),
+                                  log_likelihoods%>% 
+                filter(key == "search + pragmatics-RSAcdf") %>% pull (log_likelihood))
+  
+  full_vs_noprag <-  perform_lrt(log_likelihoods %>% 
+                  filter(key == "no pragmatics-RSAcdf") %>% pull(log_likelihood),
+                                  log_likelihoods%>% 
+                filter(key == "search + pragmatics-RSAcdf") %>% pull (log_likelihood))
+  
+  # Combine results into a data frame
+  results <- tibble(
+    comparison = c("full_vs_freq", "full_vs_nosearch", "full_vs_noprag"),
+    lr_statistic = c(full_vs_freq$lr_statistic, full_vs_nosearch$lr_statistic,
+                     full_vs_noprag$lr_statistic),
+    p_value = c(full_vs_freq$p_value, full_vs_nosearch$p_value,
+                full_vs_noprag$p_value))
+  
+  return(results)
+}
+
+# Apply the comparison function to each level
+comparison_results <- filtered_df %>%
+  group_by(Level) %>%
+  group_modify(~ compare_models_by_level(.x)) %>%
+  ungroup()
+
+# View the results
+View(comparison_results)
+
+```
+
 # cost heatmap
 ```{r}
 speaker %>%
