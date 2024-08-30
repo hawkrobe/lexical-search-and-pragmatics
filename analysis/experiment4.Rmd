@@ -97,11 +97,6 @@ level_model = lmer(data = num_candidates, utterance ~ level + (1|clueGiverID))
 car::Anova(level_model)
 nobs(level_model)
 emmeans::emmeans(level_model, pairwise ~ level, adjust = "tukey")
-
-wordpair_model =lmer(data = num_candidates, utterance ~ wordpair + (1|clueGiverID))
-car::Anova(wordpair_model)
-nobs(wordpair_model)
-
 ```
 
 
@@ -134,10 +129,10 @@ d.order %>%
     geom_bar(stat = 'identity', color = 'black') +
     theme_few() +
     scale_fill_grey(name = "order", start=1, end=0.2) +
-    labs(y = 'proportion matching final clue', x = '') +
+    labs(y = 'proportion matching\nfinal clue', x = '') +
     theme(aspect.ratio = 1)
 
-ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 3)
+ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 2)
 ```
 ### by seqOrder
 ```{r}
