@@ -237,6 +237,31 @@ class Selector:
       # distractor_pairs = np.delete(list(self.board_combos[boardname]['wordpair']), target_idx, axis=0)
       # distractors = np.delete(self.sims[boardname], target_idx, axis=0)
       # print('biggest distractor', distractor_pairs[np.argmax(distractors,axis=0)[idx]])
+    
+  def print_multiple_examples(self, targets, cost_fn_fit, clues):
+    # find the board with the target wordpair
+      boardname = self.targets.query("wordpair == @targets")['boardnames'].values[0]
+      
+      target_idx = list(selector.board_combos[boardname]['wordpair']).index(targets)
+    
+      diag = selector.diagnosticity(boardname, target_idx)
+      
+      cost = selector.cost[cost_fn_fit][targets]
+      utility = selector.pragmatic_speaker(targets, boardname, cost_fn_fit, range(len(selector.vocab)))
+      
+      # create df with wordpair column only
+      target_df = pd.DataFrame()
+      
+
+      for word in clues:
+        if word not in list(selector.vocab["Word"]):
+          target_df = target_df.append({'wordpair': targets, 'clue': word, 'cost': 'NA', 'diag': 'NA', 'utility': 'NA'}, ignore_index=True)
+        else:
+          idx = list(selector.vocab["Word"]).index(word)
+          # add wordpair, word, cost, diag, utility to df
+          target_df = target_df.append({'wordpair': targets, 'clue': word, 'cost': cost[idx], 'diag': diag[idx], 'utility': utility[idx]}, ignore_index=True)
+      return target_df
+        
 
 if __name__ == "__main__":
   #exp_path = '../data/exp1/'
@@ -247,7 +272,7 @@ if __name__ == "__main__":
   #   f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
   # )
 
-  exp_path = '../data/exp2/'
+  #exp_path = '../data/exp2/'
   # selector = Selector(exp_path, sys.argv[1:])
 
   # # find optimal parameters
@@ -260,16 +285,33 @@ if __name__ == "__main__":
   # try out example
   # params is organized as [cost_type, inf_type, alpha, costweight, distweight]
   
-  print("Experiment 1: Full Experiment")
-  # for lion-tiger
-  # selector = Selector('../data/exp1/', ['cdf', 'RSA', 32, 0.16, 0])
-  # selector.print_examples('lion-tiger', 256)
-  # for snake-ash
-  selector = Selector('../data/exp1/', ['cdf', 'RSA', 32, 0.32, 0])
-  selector.print_examples('snake-ash', 256)
-  print("Experiment 2: Ratings")
-  # selector = Selector('../data/exp2/', ['cdf', 'RSA', 2, 0.36, 0])
-  # selector.print_examples('lion-tiger', 2048)
-  # for snake-ash
-  selector = Selector('../data/exp1/', ['cdf', 'RSA', 2, 0.06, 0])
-  selector.print_examples('snake-ash', 512)
+  # print("Experiment 1: Full Experiment")
+  # # for lion-tiger
+  # # selector = Selector('../data/exp1/', ['cdf', 'RSA', 32, 0.16, 0])
+  # # selector.print_examples('lion-tiger', 256)
+  # # for snake-ash
+  # selector = Selector('../data/exp1/', ['cdf', 'RSA', 32, 0.32, 0])
+  # selector.print_examples('snake-ash', 256)
+  # print("Experiment 2: Ratings")
+  # # selector = Selector('../data/exp2/', ['cdf', 'RSA', 2, 0.36, 0])
+  # # selector.print_examples('lion-tiger', 2048)
+  # # for snake-ash
+  # selector = Selector('../data/exp1/', ['cdf', 'RSA', 2, 0.06, 0])
+  # selector.print_examples('snake-ash', 512)
+
+  ## multiple examples
+  exp_path = '../data/exp1'
+  pairs = pd.read_csv(f"{exp_path}/model_input/example_params.csv")
+  compiled_df = pd.DataFrame()
+  for index, row in pairs.iterrows() :
+    targets = row['wordpair']
+    cost_fn_fit = row['cost_fn']
+    alpha = row['alpha']
+    costweight = row['costweight']
+    clues = row['collapsed_clues'].split(', ')
+    print(f"target: {targets}, cost_fn: {cost_fn_fit}, alpha: {alpha}, costweight: {costweight}, clues: {clues}")
+
+    selector = Selector(exp_path, ['cdf', 'RSA', alpha, costweight, 0])
+    target_df = selector.print_multiple_examples(targets, cost_fn_fit, clues)
+    compiled_df = pd.concat([compiled_df, target_df])
+  compiled_df.to_csv(f'{exp_path}/model_output/multiple_examples.csv')
