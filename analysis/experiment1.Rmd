@@ -276,7 +276,7 @@ blended %>%
     labs(x = "search budget", y = "log likelihood", color = "bias") +
     theme(aspect.ratio = 1, legend.position = 'right')
 
-ggsave('blended.pdf', height = 15, width = 15)
+ggsave(here('plots/appendixA_blended.pdf'), height = 5, width = 8)
 ```
 
 ## examine CDFs
@@ -291,10 +291,9 @@ blended_raw %>%
     geom_line() +
     facet_wrap(bias_weight ~ ., scales = 'free') +
     scale_x_log10() +
-#    ylim(0, 1) +
     theme_few() +
     labs(x = "search budget") +
     theme(aspect.ratio = 1, legend.position = 'none')
 
-ggsave('blended.pdf', height = 15, width = 15)
+ggsave(here('plots/appendixA_lion-tiger-cdfs.pdf'), height = 15, width = 15)
 ```
