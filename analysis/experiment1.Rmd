@@ -22,8 +22,7 @@ library(jsonlite)
 # speaker selections
 
 ```{r}
-
-exp1_speaker_df <- read_csv(here("../data/exp1/model_output/speaker_df.csv"))
+exp1_speaker_df <- read_csv(here("data/exp1/model_output/speaker_df.csv"))
 
 # recompute levels based on listener accuracy
 
@@ -213,9 +212,12 @@ speaker %>%
 ggsave(here("plots/exp1_heatmap.pdf"), units = 'in', width = 6, height = 5)
 ```
 
-# blended model
+# Appendix A: Blended model
 
 ```{r}
+d_exp1 <- read_csv(here("data/exp1/cleaned.csv")) %>%
+  mutate(Level = fct_collapse(Level, Hard = c("Medium", "Hard")))
+
 logsumexp <- function(x) {
   y <- max(x)
   y + log(sum(exp(x - y)))
@@ -236,7 +238,7 @@ blended_raw <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
 ```{r}
 blended <- blended_raw %>%
   group_by(wordpair, step,  bias_weight) %>%
-  mutate(prob = softmax(6 * cdf)) %>%
+  mutate(prob = softmax(8 * cdf)) %>%
   ungroup() %>%
   right_join(d_exp1, relationship = "many-to-many") %>%
   filter(!is.na(bias_weight)) %>%
@@ -244,7 +246,7 @@ blended <- blended_raw %>%
   summarize(loglik = sum(log(prob), na.rm = TRUE))
 
 blended %>%
-  ungroup() %>%
+  group_by(Level) %>%
   filter(loglik == max(loglik))
 ```
 
@@ -283,61 +285,3 @@ blended_raw %>%
 
 ggsave('blended.pdf', height = 15, width = 15)
 ```
-
-
-<!-- ## OTHER CODE -->
-
-<!-- ## Compute costs for the whole vocab -->
-
-<!-- ```{r} -->
-<!-- pairs <- d.exp1 %>% pull(wordpair) %>% unique() -->
-
-<!-- getWalks <- function(pair) { -->
-<!--   paste0('data/exp1/model_output/', pair, '-walks.json', collapse = '') %>% -->
-<!--     here() %>% -->
-<!--     fromJSON() %>%  -->
-<!--     as_tibble() %>% -->
-<!--     mutate(step = row_number()) %>% -->
-<!--     gather(walk, Word, -step) %>% -->
-<!--     mutate(walk = gsub('walk-', '', walk), -->
-<!--            wordpair = pair) %>%  -->
-<!--     group_by(walk, Word, wordpair) %>% -->
-<!--     filter(step == first(step)) %>% -->
-<!--     group_by(step, Word, wordpair) %>% -->
-<!--     tally() %>% -->
-<!--     ungroup() %>% -->
-<!--     group_by(wordpair) %>% -->
-<!--     complete(Word, step = 2**seq(13), fill = list(n=0)) %>% -->
-<!--     group_by(Word, wordpair) %>% -->
-<!--     arrange(step) %>% -->
-<!--     mutate(cdf = cumsum(n)/2000) %>% -->
-<!--     filter(step %in% 2**seq(13)) %>% -->
-<!--     write_csv(here(paste0('data/exp1/model_output/', pair, '-cdf.csv',collapse = ''))) -->
-<!-- } -->
-
-<!-- library(furrr) -->
-<!-- library(progressr) -->
-
-<!-- plan(multisession, workers = 8) -->
-<!-- cdfs <- with_progress({ -->
-<!--     p <- progressor(steps = length(pairs)) -->
-<!--     future_walk(pairs, ~{p(); getWalks(.x)})  -->
-<!-- }) -->
-<!-- ``` -->
-
-<!-- # Reformat -->
-
-<!-- ```{r} -->
-<!-- complete_df <- read_csv(here('data/exp1/model_input/vocab.csv')) %>% -->
-<!--   left_join(read_csv(here('data/exp1/model_output/ranks.csv'))) %>% -->
-<!--   mutate(single = (w1_index_walk + w2_index_walk)/2) %>% -->
-<!--   select(-`...1`, -index, -Occurrences,-Length) %>% -->
-<!--   gather(measure, value, -Word, -wordpair) %>% -->
-<!--   complete(Word, wordpair, measure, fill = list(value = 0)) %>% -->
-<!--   filter(!is.na(step), !is.na(wordpair)) -->
-
-<!-- read_csv(here('data/exp1/model_input/vocab.csv')) %>% -->
-<!--   left_join(complete_df) %>% -->
-<!--   select(Word,wordpair,measure,value) %>% -->
-<!--   write_csv(here('data/exp1/model_output/freqs_long.csv')) -->
-<!-- ``` -->
