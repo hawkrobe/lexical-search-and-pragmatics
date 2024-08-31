@@ -106,17 +106,6 @@ exp3RT = read_csv("../data/exp3/cleaned.csv") %>%
   rename(RT = associateRT) %>%
   mutate(exp = "E3")
   
-rbind(exp1RT, exp3RT) %>%
-  group_by(exp, wordpair, correctedClue) %>%
-  summarize(RT = mean(RT)) %>%
-  pivot_wider(names_from = exp, values_from = RT) %>%
-  filter(!is.na(E1) & !is.na(E3)) %>%
-  pivot_longer(names_to = "experiment", cols = E1:E3) %>%
-  ggplot(aes(x=value, group = experiment, fill = experiment)) +
-  geom_histogram(binwidth = 1000) +
-   theme_clean() + theme(legend.position = c(0.8,0.8), aspect.ratio = 1)+
-  scale_fill_hc() + labs(x = "reaction time (ms)", y="frequency")
-  
 ## model
 
 RTdata = rbind(exp1RT, exp3RT) 
@@ -207,8 +196,23 @@ ggsave('plots/exp3_swow.pdf', units = 'in', height = 5, width = 5)
 ```{r}
 exp3_speaker_dfs = read_csv(here("../data/exp3/model_output/speaker_df.csv"))
 
+wordpair_levels = wordpairRTs %>%
+  separate(wordpair, into =  c("target1", "target2")) %>%
+  rowwise()%>%
+  mutate(Word1 = min(target1, target2),
+         Word2 = max(target1, target2))%>%
+  select(-c(target1, target2)) %>%
+  unite(wordpair, Word1, Word2, sep = '-')
+
 beste3_models = exp3_speaker_dfs %>%
+  rowwise() %>%
+  mutate(Word1 = min(Prime, Target),
+         Word2 = max(Prime, Target)) %>%
+  select(-c(Level,wordpair)) %>%
+  unite(wordpair, Word1, Word2, sep = '-') %>%
+  ungroup()%>%
   filter(model %in% c("RSAcdf", "RSAfreq"))%>%
+  left_join(wordpair_levels) %>%
   mutate(type = ifelse(costweight == 0, "no search",
                        ifelse(model == "RSAcdf", "walk-based search", "frequency"))) %>%
   mutate(LL = log(prob)) %>%

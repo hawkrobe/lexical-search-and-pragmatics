@@ -53,6 +53,19 @@ wordpair_params = speaker %>% group_by(wordpair) %>%
   ungroup() %>%
   group_by(wordpair) %>%
   filter(sumLL == max(sumLL))
+
+
+## for exp1 vs. exp2 comparison
+
+# identify pairs where boards changed
+
+exp1_params = read_csv('../data/exp2/model_input/example_params.csv') %>%
+  select(wordpair, collapsed_clues) %>%
+  left_join(wordpair_params %>% select(wordpair, alpha, cost_fn, costweight))
+
+write.csv(exp1_params,
+          file = "../data/exp1/model_input/example_params.csv",
+          row.names = FALSE)
 ```
 
 # model comparison plot

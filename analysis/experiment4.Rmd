@@ -97,11 +97,6 @@ level_model = lmer(data = num_candidates, utterance ~ level + (1|clueGiverID))
 car::Anova(level_model)
 nobs(level_model)
 emmeans::emmeans(level_model, pairwise ~ level, adjust = "tukey")
-
-wordpair_model =lmer(data = num_candidates, utterance ~ wordpair + (1|clueGiverID))
-car::Anova(wordpair_model)
-nobs(wordpair_model)
-
 ```
 
 
@@ -134,10 +129,10 @@ d.order %>%
     geom_bar(stat = 'identity', color = 'black') +
     theme_few() +
     scale_fill_grey(name = "order", start=1, end=0.2) +
-    labs(y = 'proportion matching final clue', x = '') +
+    labs(y = 'proportion matching\nfinal clue', x = '') +
     theme(aspect.ratio = 1)
 
-ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 3)
+ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 2)
 ```
 ### by seqOrder
 ```{r}
@@ -434,13 +429,13 @@ ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
 ## Examine example walks
 
 ```{r}
-pairs = d %>% pull(wordpair) %>% unique()
-clues <- read_csv(here('data/exp4/cleaned.csv')) %>%
+pairs = exp4_newlevels %>% pull(wordpair) %>% unique()
+clues <- read_csv(here('../data/exp4/cleaned_complete.csv')) %>%
   group_by(wordpair, seqOrder, correctedClue) %>%
-  tally(name = 'clueCount') 
+  tally(name = 'clueCount')
 
 getWalks <- function(pair) {
-  paste0('data/exp4/model_output/', pair, '-walks.json', collapse = '') %>%
+  paste0('../data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
     here() %>%
     fromJSON() %>% 
     as_tibble() %>%
@@ -487,10 +482,10 @@ walks <- map(pairs, getWalks, .progress = T) %>%
 
 d.spearmancor <- walks %>%
   left_join(clues) %>%
-  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
+  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal'))%>%
   group_by(wordpair, seqOrder, step) %>%
   summarize(r = cor(cdf, clueCount, method = 'spearman')) %>%
-  left_join(d.levels) 
+  left_join(exp4_newlevels %>% select(wordpair, level)) 
 
 d.spearmancor.toplot <- d.spearmancor %>%
   ungroup() %>%
@@ -504,8 +499,8 @@ d.spearmancor.toplot %>%
   ungroup() %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueOrder2', 'clueOrder1', 'clueOrder3', 'clueFinal')) %>%
   ggplot(aes(x = step, y = r, alpha = seqOrder, color = level)) +
-    # geom_line(aes(group = wordpair), alpha = 0.1, 
-    #           data = d.spearmancor  %>% filter(step %in% 2**seq(1,13))) +
+    geom_line(aes(group = wordpair), alpha = 0.1,
+              data = d.spearmancor  %>% filter(step %in% 2**seq(1,13))) +
     geom_line() +
     theme_few() +
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +

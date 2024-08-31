@@ -313,6 +313,7 @@ best_corr %>%
   geom_point(data = . %>% group_by(Level) %>% filter(r == max(r)), 
              color = "black") +
   facet_grid(~Level) +
+  scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
   theme_few() +
   labs(y = "spearman's r", x= "weight on accessibility") +
   theme(aspect.ratio = 1,
@@ -323,140 +324,201 @@ ggsave('plots/exp2_model_comparisons.pdf', units = 'in', height = 3, width = 7)
 
 ```
 
-## examples
-
-```{r}
-spearman %>% ungroup() %>%
-  group_by(Level) %>% 
-  slice(which.max(r))
-
-critical_pairs =c("LION-TIGER", "TIGER-LION", 
-                  "SNAKE-ASH", "ASH-SNAKE", 
-                  "DREAM-BET", "BET-DREAM") 
-
-# get experiment 1 data
-exp1_counts = read_csv("../data/exp1/cleaned.csv")%>%
-  mutate(wordpair = toupper(wordpair)) %>%
-  select(wordpair, correctedClue, boardnames) %>%
-  filter(wordpair %in% critical_pairs) %>%
-  mutate(wordpair = ifelse(wordpair == "ASH-SNAKE", "SNAKE-ASH", 
-                           ifelse(wordpair == "BET-DREAM", "DREAM-BET", wordpair))) %>%
-  mutate(correctedClue = ifelse(correctedClue == "animals", "animal",
-                                ifelse(correctedClue == "cats", "cat",
-                                       ifelse(correctedClue == "bears", "bear",
-                                  ifelse(correctedClue == "mammals", "mammal", correctedClue))))) %>%
-  group_by(wordpair, correctedClue) %>% count()
-
-```
-
-
-### lion-tiger
-```{r}
-
-# Data for Experiment 1
-data_experiment_1 <- data.frame(
-  correctedClue = c("cat", "feline", "animal", "mammal"),
-  cost = c(-0.9945, -0.313, -0.89, -0.183),
-  diag = c(0.999986992605909, 0.9999966622640083, 0.9989783747991086, 0.9962831063972477),
-  utility = c(0.16831637454631979, 0.005138829401713459, 0.09593719356022759, 0.0023902666505167458),
-  experiment = "1 (utterances)"
-)
-data_experiment_1$wordpair = "LION-TIGER"
-
-data_experiment_1 = data_experiment_1 %>% left_join(exp1_counts)%>%
-  mutate(utility_rank = rank(utility),
-         speaker_rank = rank(n)) %>%
-  select(correctedClue, utility_rank, speaker_rank,experiment)
-# Data for Experiment 2
-
-data_experiment_2 <- data.frame(
-  correctedClue = c("cat", "feline", "animal", "mammal"),
-  cost = c(-1.0, -0.9465, -1.0, -0.7605),
-  diag = c(0.9999108075545245, 0.9999701999332463, 0.6593746992714851, 0.35711174747703006),
-  utility = c(0.0005542812246481323, 0.000533376847829783, 0.00035844884750137353, 0.00020488511077016827),
-  experiment = "2 (ratings)"
-)
-data_experiment_2$wordpair = "lion-tiger"
-data_experiment_2 = data_experiment_2 %>% left_join(ratings %>% select(-z_rating)) %>%
-  mutate(utility_rank = rank(utility),
-         speaker_rank = rank(response)) %>%
-  select(correctedClue, utility_rank, speaker_rank, experiment)
-
-rbind(data_experiment_1, data_experiment_2) %>%
-  rename(`speaker ranks` = "speaker_rank", `model ranks` = "utility_rank")%>%
-  pivot_longer(names_to = "type", cols = `model ranks`:`speaker ranks` ) %>%
-  mutate(type = as.factor(type),
-         type = fct_relevel(type, "speaker ranks", "model ranks")) %>%
-  ggplot(aes(x = correctedClue, y = value, group = experiment, fill = experiment)) +
-  geom_col(position = "dodge") +
-  facet_wrap(~type) + 
-  scale_fill_calc()+
-  theme_few() +
-  labs(x = "clue", y = "ranks")+
-  theme(aspect.ratio = 1, 
-        legend.position =  c(0.9,0.87),
-        legend.key.size = unit(0.3, "cm"),
-        axis.text.x = element_text(size = rel(1.5)),
-        strip.text.x = element_text(size = rel(1.5)))
-
-ggsave('plots/exp2_example.pdf', units = 'in', height = 4, width = 8)
-
-```
-
 ## no cost model
 
 ```{r}
 best_corr %>% filter(type == "no search")
 ```
 
-
-# extra
+## examples
 
 ```{r}
-## create new targets, with list of clues as a new column
+level_bestfit = spearman %>% ungroup() %>%
+  group_by(Level) %>% 
+  slice(which.max(r))
 
-targets_and_clues = read_csv("data/exp3/cleaned.csv")  %>%
-  select(word1, word2, Experiment, boardnames,wordpair,correctedClue)
+# identify pairs where boards changed
 
-clues_wide =targets_and_clues %>%
+critical_pairs_raw =c("LION-TIGER", "TIGER-LION", 
+                  "SNAKE-ASH", "ASH-SNAKE", 
+                  "HAND-BIRTH", "BIRTH-HAND",
+                  "QUICK-GLOW", "GLOW-QUICK",
+                  "TREE-OAK","OAK-TREE",
+                  "CAVE-KNIGHT", "KNIGHT-CAVE",
+                  "HOLY-KIND", "KIND-HOLY",
+                  "RUDE-REGRET", "REGRET-RUDE",
+                  "TEETH-GUMS", "GUMS-TEETH",
+                  "JUMP-LEAP", "LEAP-JUMP",
+                  "TRAVEL-ANKLE", "ANKLE-TRAVEL",
+                 "DREAM-BET", "BET-DREAM", 
+                 "ELM-ROCK", "ROCK-ELM",
+                 "CRUST-BOOT", "BOOT-CRUST",
+                 "SIT-STAND", "STAND-SIT",
+                "GIANT-SUBTLE", "SUBTLE-GIANT",
+                "ARMY-DRUM", "DRUM-ARMY",
+                "HAPPY-SAD", "SAD-HAPPY")
+
+critical_pairs = as.data.frame(critical_pairs_raw) %>% 
+  rename(wordpair = critical_pairs) %>% mutate(wordpair = tolower(wordpair))
+
+# identify the clues that were rated for each of these
+
+critical_clues = ratings %>% filter(wordpair %in% critical_pairs$wordpair) %>%
+  select(wordpair, correctedClue) %>% 
+  mutate(correctedClue = ifelse(correctedClue == "pokemon", "Pokemon", correctedClue))%>%
   group_by(wordpair) %>%
-  summarise(clues = paste(unique(correctedClue), collapse = ','))
+  summarize(collapsed_clues = str_c(correctedClue, collapse = ", "))
 
-targets_and_clues = targets_and_clues %>% select(-correctedClue)%>% unique() %>%
-  left_join(clues_wide)
+exp2_params = critical_pairs %>%
+  left_join(wordpair_accuracy %>% select(wordpair, Level))%>%
+  filter(!is.na(Level)) %>%
+  left_join(level_bestfit %>% select(Level, alpha, cost_fn, costweight))  %>%
+  left_join(critical_clues)
 
-write.csv(targets_and_clues, file = "data/exp3/revised_targets.csv", row.names = FALSE)
+# write.csv(exp2_params,
+#           file = "../data/exp2/model_input/example_params.csv", 
+#           row.names = FALSE)
+
+# obtain model probabilities
+
+exp1vsexp2 = rbind(read_csv("../data/exp1/model_output/multiple_examples.csv") %>%
+                     mutate(exp = "E1"), 
+                   read_csv("../data/exp2/model_output/multiple_examples.csv") %>%
+                     mutate(exp = "E2")) %>%
+  rename(correctedClue = clue)
+
+# get experiment 1 data
+exp1_counts = read_csv("../data/exp1/cleaned.csv")%>%
+  select(wordpair, correctedClue, boardnames) %>%
+  mutate(wordpair = ifelse(wordpair == "ASH-SNAKE", "SNAKE-ASH", 
+                           ifelse(wordpair == "BET-DREAM", "DREAM-BET", wordpair))) %>%
+  mutate(correctedClue = ifelse(correctedClue == "animals", "animal",
+                                ifelse(correctedClue == "cats", "cat",
+                                       ifelse(correctedClue == "bears", "bear",
+                                  ifelse(correctedClue == "mammals", "mammal", correctedClue))))) %>%
+  group_by(wordpair, correctedClue) %>% count() %>% mutate(exp = "E1")
+
+exp1vsexp2 = exp1vsexp2 %>%
+  left_join(exp1_counts) %>%
+  left_join(ratings %>% mutate(exp = "E2") %>%
+              select(wordpair, correctedClue, response, exp)) %>%
+  group_by(wordpair, exp) %>%
+  mutate(speaker_rank = ifelse(exp == "E1", rank(n), rank(response)),
+         model_rank = rank(utility))
 
 ```
 
-## board comparison
+### lion-tiger
+```{r}
+exp1vsexp2 %>%
+  mutate(exp = as.factor(exp)) %>%
+  mutate(exp = fct_recode(as.factor(exp), `E1 (utterances)` = "E1", `E2 (ratings)` = "E2")) %>%
+  filter(wordpair %in% c("lion-tiger")) %>%
+  rename(`speaker ranks` = "speaker_rank", `model ranks` = "model_rank")%>%
+  pivot_longer(names_to = "type", cols = `model ranks`:`speaker ranks` ) %>%
+  mutate(type = as.factor(type),
+         type = fct_relevel(type, "speaker ranks", "model ranks")) %>%
+  ggplot(aes(x = exp, y = value, group =correctedClue , fill = correctedClue)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = correctedClue), 
+            position = position_dodge(width = 0.9), 
+            vjust = 0.5, 
+            hjust = 1.1,
+            angle = 90, 
+            color = "white", 
+            size = rel(4)) +
+  facet_wrap(~type) + 
+  scale_fill_calc()+
+  theme_few() +
+  labs(x = "", y = "ranks")+
+  theme(aspect.ratio = 1, 
+        legend.position =  "none",
+        axis.text.x = element_text(size = rel(1.5)),
+        strip.text.x = element_text(size = rel(1.5)))
+ggsave('plots/exp2_lion_tiger_ranks.pdf', units = 'in', height = 4, width = 8)
+
+```
+
+### other pairs
 
 ```{r}
-  
 
-clean_and_unite <- function(column) {
-  column %>%
-    mutate_all(~ str_remove_all(., "\\[|\\]|\""))
-}
+exp1vsexp2 %>%
+  mutate(exp = as.factor(exp)) %>%
+  mutate(exp = fct_recode(as.factor(exp), `E1 (utterances)` = "E1", `E2 (ratings)` = "E2")) %>%
+  rename(`speaker ranks` = "speaker_rank")%>%
+  ggplot(aes(x = exp, y = `speaker ranks`, group =correctedClue , fill = correctedClue)) +
+  geom_col(position = "dodge", color = "black") +
+  facet_wrap(~wordpair, nrow = 6) + 
+  geom_text(aes(label = correctedClue), 
+            position = position_dodge(width = 0.9), 
+            vjust = 0.5, 
+            hjust = -0.2,
+            angle = 90, 
+            color = "black", 
+            size = rel(3.5)) +
+  theme_few() +
+  labs(x = "", y = "speaker ranks")+
+  theme(
+        legend.position =  "none",
+        axis.text.x = element_text(size = rel(1.5)),
+        strip.text = element_text(size = 12, face = "bold", color = "white"),
+    strip.background = element_rect(color = "black", fill = "darkgray")
+  )
 
-boards = readxl::read_excel("../data/all_boards.xlsx") %>%
-  clean_and_unite() %>%
-  mutate(exp1 = str_split(gsub(",\\s*", " ", exp1), "\\s+"),
-         exp2 = str_split(gsub(",\\s*", " ", exp2), "\\s+"),
-         exp3 = str_split(gsub(",\\s*", " ", exp3), "\\s+")) %>%
-  mutate(e1e3 = map2_lgl(exp1, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))),
-         e1e2 = map2_lgl(exp1, exp2, ~ identical(sort(tolower(.x)), sort(tolower(.y)))),
-         e2e3 = map2_lgl(exp2, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))),
-         in_e1_not_e2 = map2(exp1, exp2, ~ setdiff(tolower(.x), tolower(.y))),
-         in_e2_not_e1 = map2(exp1, exp2, ~ setdiff(tolower(.y), tolower(.x))),
-         in_e1_not_e3 = map2(exp1, exp3, ~ setdiff(tolower(.x), tolower(.y))),
-         in_e3_not_e1 = map2(exp1, exp3, ~ setdiff(tolower(.y), tolower(.x))),
-         in_e2_not_e3 = map2(exp2, exp3, ~ setdiff(tolower(.x), tolower(.y))),
-         in_e3_not_e2 = map2(exp2, exp3, ~ setdiff(tolower(.y), tolower(.x))))
+ggsave('plots/exp2_example.pdf',units = 'in', height = 13, width = 10)
 
-View(boards %>% filter(!e1e3))
-View(boards %>% filter(!e1e2, !is.na(exp2)))
-View(boards %>% filter(!e2e3, !is.na(exp2)))
 ```
+
+
+
+<!-- # extra -->
+
+<!-- ```{r} -->
+<!-- ## create new targets, with list of clues as a new column -->
+
+<!-- targets_and_clues = read_csv("data/exp3/cleaned.csv")  %>% -->
+<!--   select(word1, word2, Experiment, boardnames,wordpair,correctedClue) -->
+
+<!-- clues_wide =targets_and_clues %>% -->
+<!--   group_by(wordpair) %>% -->
+<!--   summarise(clues = paste(unique(correctedClue), collapse = ',')) -->
+
+<!-- targets_and_clues = targets_and_clues %>% select(-correctedClue)%>% unique() %>% -->
+<!--   left_join(clues_wide) -->
+
+<!-- write.csv(targets_and_clues, file = "data/exp3/revised_targets.csv", row.names = FALSE) -->
+
+<!-- ``` -->
+
+<!-- ## board comparison -->
+
+<!-- ```{r} -->
+
+
+<!-- clean_and_unite <- function(column) { -->
+<!--   column %>% -->
+<!--     mutate_all(~ str_remove_all(., "\\[|\\]|\"")) -->
+<!-- } -->
+
+<!-- boards = readxl::read_excel("../data/all_boards.xlsx") %>% -->
+<!--   clean_and_unite() %>% -->
+<!--   mutate(exp1 = str_split(gsub(",\\s*", " ", exp1), "\\s+"), -->
+<!--          exp2 = str_split(gsub(",\\s*", " ", exp2), "\\s+"), -->
+<!--          exp3 = str_split(gsub(",\\s*", " ", exp3), "\\s+")) %>% -->
+<!--   mutate(e1e3 = map2_lgl(exp1, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))), -->
+<!--          e1e2 = map2_lgl(exp1, exp2, ~ identical(sort(tolower(.x)), sort(tolower(.y)))), -->
+<!--          e2e3 = map2_lgl(exp2, exp3, ~ identical(sort(tolower(.x)), sort(tolower(.y)))), -->
+<!--          in_e1_not_e2 = map2(exp1, exp2, ~ setdiff(tolower(.x), tolower(.y))), -->
+<!--          in_e2_not_e1 = map2(exp1, exp2, ~ setdiff(tolower(.y), tolower(.x))), -->
+<!--          in_e1_not_e3 = map2(exp1, exp3, ~ setdiff(tolower(.x), tolower(.y))), -->
+<!--          in_e3_not_e1 = map2(exp1, exp3, ~ setdiff(tolower(.y), tolower(.x))), -->
+<!--          in_e2_not_e3 = map2(exp2, exp3, ~ setdiff(tolower(.x), tolower(.y))), -->
+<!--          in_e3_not_e2 = map2(exp2, exp3, ~ setdiff(tolower(.y), tolower(.x)))) -->
+
+<!-- View(boards %>% filter(!e1e3)) -->
+<!-- View(boards %>% filter(!e1e2, !is.na(exp2))) -->
+<!-- View(boards %>% filter(!e2e3, !is.na(exp2))) -->
+<!-- ``` -->
 
 
