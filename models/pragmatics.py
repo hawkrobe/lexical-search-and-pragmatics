@@ -4,33 +4,31 @@ import pickle
 import itertools
 import warnings
 import scipy
-from functools import lru_cache
-
-import scipy.spatial.distance
 
 import pandas as pd
 import numpy as np
-import networkx as nx
+
+from scipy.spatial.distance import cdist
+from functools import lru_cache
+from scipy.special import softmax
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from scipy.special import softmax, expit, logit
-from scipy.stats import norm
-#from joblib import Parallel, delayed, parallel_config
-from tqdm import tqdm
 
 class Selector:
-  def __init__(self, exp_path, params) :
-    
+  def __init__(
+      self,
+      exp_path,
+      cost_type = 'none',
+      inf_type = 'RSA',
+      alpha = 20,
+      costweight = 0
+    ) :
+
     # handle parameters
-    self.cost_type = params[0] if len(params) > 0 else 'cdf'
-    self.inf_type = params[1] if len(params) > 1 else 'additive'
-    self.alpha = float(params[2]) if len(params) > 2 else None
-    self.costweight = float(params[3]) if len(params) > 3 else None
-    self.distweight = float(params[4]) if len(params) > 4 else None
-    # if self.inf_type == 'additive' :
-    #   assert(self.distweight is not None)
-    # else :
-    #   assert(self.alpha is not None and self.costweight is not None)
+    self.cost_type = cost_type
+    self.inf_type = inf_type
+    self.alpha = alpha
+    self.costweight = costweight
 
     # read in metadata
     self.exp_path = exp_path
@@ -52,37 +50,26 @@ class Selector:
     }
 
   def create_cost_fn(self) :
-    print('building cost fn...')
+    self.cost = {}
+    if self.cost_type == 'none':
+      return
 
     # transform measures to costs
     measure_df = pd.read_csv(f"{self.exp_path}/model_output/{self.cost_type}s_long.csv")
     measure_df.loc[:,'value'] = -1 * measure_df.loc[:,'value']
-
-    self.cost = {}
     for measure in measure_df['measure'].unique() :
       subset = measure_df.query("measure == @measure")
       self.cost[measure] = {
         wordpair: subset.query("wordpair == @wordpair")['value'].to_numpy()
         for wordpair in self.cluedata['wordpair'].unique()
       }
-      # at this point, we want to check which dict values are empty and use the flipped version
-
       # find dict values that are empty
+      # for each empty value, flip the wordpair and find the corresponding value
       empty = [k for k, v in self.cost[measure].items() if len(v) == 0]
-
-      # for each empty value, flip the wordpair and find the corresponding value inside subset
-
       for wordpair in empty :
         flipped = wordpair.split('-')[1] + '-' + wordpair.split('-')[0]
         self.cost[measure][wordpair] = subset.query("wordpair == @flipped")['value'].to_numpy()
 
-    #print("self.cost=", self.cost)
-
-    
-
-    
-
-  
   def create_board_combos(self):
     '''
     calculates all pairwise combinations of the words on the board
@@ -107,7 +94,7 @@ class Selector:
     board_vectors = self.embeddings[list(board_df.index)]
 
     ## clue_sims is the similarity of ALL clues in full candidate space to EACH word on board (size 20)
-    clue_sims = 1 - scipy.spatial.distance.cdist(board_vectors, self.embeddings, 'cosine')
+    clue_sims = 1 - cdist(board_vectors, self.embeddings, 'cosine')
 
     ## next we take thesimilarities between c-w1 and c-w2 for that
     ## specific board's 190 word-pairs.
@@ -134,35 +121,22 @@ class Selector:
       return self.literal_guesser(boardname)[targetpair_idx].ravel()
     elif self.inf_type == 'additive' :
       distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
-      #assert(distractors.shape == (189, 12218))
       return -np.max(distractors, axis=0) if len(distractors) > 0 else np.zeros(len(self.vocab))
     elif self.inf_type == 'no_prag' :
       return 0
-
-  def fit(self, boardname, targetpair_idx) :
-    return self.sims[boardname][targetpair_idx].ravel()
-
-  def informativity(self, boardname, targetpair_idx) :
-    return self.diagnosticity(boardname, targetpair_idx)
-    # return ((1-self.distweight) * self.fit(boardname, targetpair_idx)
-    #          + self.distweight * self.diagnosticity(boardname, targetpair_idx))
 
   def pragmatic_speaker(self, targetpair, boardname, cost_fn, clueset):
     '''
     softmax likelihood of each possible clue
     '''
-    #print("targetpair=", targetpair)
     flipped = 0 if targetpair in list(self.board_combos[boardname]['wordpair']) else 1
     flipped_targetpair = targetpair.split('-')[1] + '-' + targetpair.split('-')[0]
     targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair) if not flipped else list(self.board_combos[boardname]['wordpair']).index(flipped_targetpair)
-    inf = self.informativity(boardname, targetpair_idx)
-    
-    
+    inf = self.diagnosticity(boardname, targetpair_idx)
+
     flipped = 0 if targetpair in list(self.cost[cost_fn].keys()) else 1
-  
     cost = self.cost[cost_fn][targetpair].ravel() if not flipped else self.cost[cost_fn][flipped_targetpair].ravel()
-    
-    utility = (1-self.costweight) * inf - self.costweight * cost
+    utility = (1 - self.costweight) * inf - self.costweight * cost
     return softmax(self.alpha * utility[clueset])
 
   def get_speaker_df(self, clues_only = False):
@@ -194,10 +168,30 @@ class Selector:
         boarddata.loc[:,"cost_fn"] = cost_fn
         boarddata.loc[:,"alpha"] = self.alpha
         boarddata.loc[:,"costweight"] = self.costweight
-        boarddata.loc[:,"distweight"] = self.distweight
         boarddata.loc[:,"model"] = self.inf_type + self.cost_type
         boarddata.loc[:,"prob"] = speaker_probs
         boards.append(boarddata)
+    return pd.concat(boards)
+
+
+  def save_all_clues(self) :
+    boards = []
+    for index, row in self.targets.iterrows() :
+      boardname = row["boardnames"]
+      targetpair = row['wordpair']
+      targetpair_idx = list(self.board_combos[boardname]['wordpair']).index(targetpair)
+      vocab = list(self.vocab["Word"])
+      clue_indices = range(len(vocab))
+      clueset = self.vocab["Word"][clue_indices]
+      boarddata = pd.DataFrame({
+        'raw_diagnosticity' : self.diagnosticity(boardname, targetpair_idx),
+        'alpha' : self.alpha,
+        'costweight' : self.costweight,
+        'boardname': boardname,
+        'targetpair' : targetpair,
+        'clueword' : clueset
+      })
+      boards.append(boarddata)
     return pd.concat(boards)
 
   def get_spearman(self, params) :
@@ -264,6 +258,8 @@ class Selector:
         
 
 if __name__ == "__main__":
+
+
   #exp_path = '../data/exp1/'
   #selector = Selector(exp_path, sys.argv[1:])
   #selector.print_examples()
@@ -311,7 +307,8 @@ if __name__ == "__main__":
     clues = row['collapsed_clues'].split(', ')
     print(f"target: {targets}, cost_fn: {cost_fn_fit}, alpha: {alpha}, costweight: {costweight}, clues: {clues}")
 
-    selector = Selector(exp_path, ['cdf', 'RSA', alpha, costweight, 0])
+    selector = Selector(exp_path, cost_type = 'cdf', inf_type = 'RSA', alpha = alpha, costweight = costweight)
     target_df = selector.print_multiple_examples(targets, cost_fn_fit, clues)
     compiled_df = pd.concat([compiled_df, target_df])
+
   compiled_df.to_csv(f'{exp_path}/model_output/multiple_examples.csv')
