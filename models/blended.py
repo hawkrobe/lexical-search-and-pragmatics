@@ -1,6 +1,7 @@
 import os
 import walker
 import warnings
+import pragmatics
 
 import pandas as pd
 import numpy as np
@@ -8,31 +9,28 @@ import networkx as nx
 
 from itertools import product
 from joblib import Parallel, delayed
-
+f
 class blended:
   def __init__(self, exp_path):
     print("Init path:", os.path.abspath('.'))
     self.exp_path = exp_path
 
     # import target words
-    self.target_df = pd.read_csv(f"{exp_path}/targets.csv")
-    self.target_df["wordpair"]= self.target_df["Word1"]+ "-"+self.target_df["Word2"]
-    self.target_words = set(self.target_df.Word1).union(self.target_df.Word2)
-    self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
-    self.vocab_size = len(list(self.vocab.Word))
+    target_df = pd.read_csv(f"{exp_path}/targets.csv")
+    target_df["wordpair"] = target_df["Word1"]+ "-"+ target_df["Word2"]
+    self.target_words = set(target_df.Word1).union(target_df.Word2)
     self.transitions = pd.read_csv(f'{exp_path}/model_input/swow_strengths.csv')\
-                         .rename(columns={'R123.Strength' : 'weight'}) 
+                         .rename(columns={'R123.Strength' : 'weight'})
+    self.biases = pragmatics.Selector(exp_path, alpha = 20, costweight = 0)\
+                            .save_all_clues()
 
-    # generated with "python pragmatics.py cdf RSA 100 0"
-    self.sims = pd.read_csv(f"{exp_path}/model_output/speaker_df_allclues.csv")
-
-    # launch grid
+    # launch grid (note that this is very memory intensive)
     with Parallel(n_jobs=9) as parallel:
       parallel(
-        delayed(self.save_candidates)(exp_path, bias_weight, word1, word2)
+        delayed(self.save_candidates)(bias_weight, word1, word2)
         for (word1, word2), bias_weight
-        in product(zip(self.target_df['Word1'], self.target_df['Word2']), 
-                   [0.05, 0.1, 0.25, 0.5, 0.75, 1])
+        in product(zip(target_df['Word1'], target_df['Word2']),
+                   [0, 0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1])
       )
 
   def get_words_by_node(self, nodes):
@@ -45,7 +43,7 @@ class blended:
                                 create_using=nx.DiGraph)
 
     # add bias for high fitness clues
-    clue_bias = self.sims.query(f"targetpair == '{clues[0]}-{clues[1]}'")\
+    clue_bias = self.biases.query(f"targetpair == '{clues[0]}-{clues[1]}'")\
                          .rename(columns={'clueword' : 'response'})
     for s in G.copy().nodes: 
       for t, bias in zip(clue_bias['response'], clue_bias['raw_diagnosticity']):
@@ -72,11 +70,12 @@ class blended:
       start_nodes=[self.name_to_index[name] for name in self.target_words]
     )
 
-  def save_candidates(self, exp_path, bias_weight, word1, word2) :
+  def save_candidates(self, bias_weight, word1, word2) :
     '''
     write out walks in order of words visited
     '''
     rw = self.run_random_walks(bias_weight, [word1, word2])
+
     print(f"Saving candidates for {word1}-{word2}-{bias_weight}")
     w1_walks = [x for x in rw if x[0] == self.name_to_index[word1]]
     w2_walks = [x for x in rw if x[0] == self.name_to_index[word2]]
@@ -104,11 +103,9 @@ class blended:
     df = df[df['step'].isin(2 ** np.arange(14))]
     df['bias_weight'] = bias_weight
 
-    output_path = os.path.join(exp_path, 'model_output', f'{word1}-{word2}-{bias_weight}-cdf-blended.csv')
+    output_path = os.path.join(self.exp_path, 'model_output', f'{word1}-{word2}-{bias_weight}-cdf-blended.csv')
     df.to_csv(output_path, index=False)
 
 if __name__ == "__main__":
   np.random.seed(12345)
-  swow_exp1 = blended('../data/exp1')
-  # swow_exp2 = blended('../data/exp2')
-  # swow_exp3 = blended('../data/exp3')
+  blended('../data/exp1')
