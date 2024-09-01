@@ -364,7 +364,7 @@ clueCounts %>%
   filter(pairClue %in% c("LION-TIGER-animal", "LION-TIGER-cat"
                          , "LION-TIGER-feline")) %>%
   ggplot(aes(x = exp, y = prop, group = correctedClue, color = correctedClue)) +
-  geom_line() +
+  geom_line(size=2) + geom_point()+
   theme_classic() +
   theme(legend.position = "none") +
   facet_wrap(~wordpair) +
@@ -376,17 +376,17 @@ clueCounts %>%
     plot.background = element_blank(),
     axis.text.x = element_text(size=16),
     axis.title.y = element_text(size=16),
-    strip.text = element_text(size = 12, face = "bold", color = "white"),
+    strip.text = element_text(size = 20, face = "bold", color = "white"),
     strip.background = element_rect(color = "black", fill = "darkgray")
-  ) +
+  )# +
   # Add labels at the last point for each correctedClue
-  geom_text(data = . %>%
-              group_by(correctedClue, wordpair) %>%
-              filter(exp == "E4\n(final)"),
-            aes(label = correctedClue),
-            hjust = -0.3,  # Slightly adjust the horizontal position
-            size = 5,
-            vjust = -0.3)      # Adjust the size of the text
+  # geom_text(data = . %>%
+  #             group_by(correctedClue, wordpair) %>%
+  #             filter(exp == "E4\n(final)"),
+  #           aes(label = correctedClue),
+  #           hjust = -0.3,  # Slightly adjust the horizontal position
+  #           size = 8,
+  #           vjust = -0.5)      # Adjust the size of the text
 
 ggsave('plots/exp4_lion_tiger.pdf', units = 'in', height = 5, width =6)
 
@@ -396,7 +396,7 @@ clueCounts %>%
   filter(pairClue %in% c("SNAKE-ASH-death","SNAKE-ASH-poison",
                          "SNAKE-ASH-burn", "SNAKE-ASH-reptile")) %>%
   ggplot(aes(x = exp, y = prop, group = correctedClue, color = correctedClue)) +
-  geom_line() +
+  geom_line(size=2) + geom_point()+
   theme_classic() +
   theme(legend.position = "none") +
   facet_wrap(~wordpair) +
@@ -408,17 +408,17 @@ clueCounts %>%
     plot.background = element_blank(),
     axis.text.x = element_text(size=16),
     axis.title.y = element_text(size=16),
-    strip.text = element_text(size = 12, face = "bold", color = "white"),
+    strip.text = element_text(size = 20, face = "bold", color = "white"),
     strip.background = element_rect(color = "black", fill = "darkgray")
-  ) +
-  # Add labels at the last point for each correctedClue
-  geom_text(data = . %>%
-              group_by(correctedClue, wordpair) %>%
-              filter(exp == "E4\n(final)"),
-            aes(label = correctedClue),
-            hjust = -0.3,  # Slightly adjust the horizontal position
-            size = 5,
-            vjust = -0.3)      # Adjust the size of the text
+  )# +
+  # # Add labels at the last point for each correctedClue
+  # geom_text(data = . %>%
+  #             group_by(correctedClue, wordpair) %>%
+  #             filter(exp == "E4\n(final)"),
+  #           aes(label = correctedClue),
+  #           hjust = -0.3,  # Slightly adjust the horizontal position
+  #           size = 5,
+  #           vjust = -0.3)      # Adjust the size of the text
 
 
 ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
