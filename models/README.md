@@ -13,3 +13,7 @@ To generate ranks and scores from baselines, run:
 To generate model comparison metrics, run:
 
 `python pragmatics.py`
+
+# Appendix A
+
+The lexical search model with top-down diagnosticity influences is implemented in `blended.py`.
