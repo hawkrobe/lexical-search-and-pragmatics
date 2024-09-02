@@ -19,95 +19,111 @@ library(here)
 library(jsonlite)
 ```
 
-# speaker selections
+# Construct speaker data frame
+
+## recompute levels based on speaker RT
 
 ```{r}
-exp1_speaker_df <- read_csv(here("data/exp1/model_output/speaker_df.csv"))
-
-# recompute levels based on speaker RT
-listener = read_csv(here("../data/exp1/raw_listener.csv")) %>%
+listener <- read_csv(here("data/exp1/raw_listener.csv")) %>%
   unite("wordpair", Word1, Word2, sep = "-") %>% 
   group_by(wordpair) %>%
   summarise(accuracy = mean(Player2.ACC),
             speakerRT = mean(Player1.RT))%>%
   mutate(listener_tertile = ntile(accuracy, 3),
-         speaker_tertile = ntile(speakerRT,3)) %>%
-  mutate(Level = ifelse(speaker_tertile == 1, "Easy", ifelse(speaker_tertile == 2, "Medium", "Hard")))
-
-car::Anova(lm(data=listener, accuracy ~ Level))
-listener %>% group_by(Level) %>% summarise(mean(accuracy))
-
-speaker = exp1_speaker_df %>% select(-Level) %>%
-  left_join(listener %>% select(wordpair, Level)) %>%
-  mutate(Level = as.factor(Level)) %>%
-  mutate(Level = fct_relevel(Level, "Easy", "Medium", "Hard"))
+         speaker_tertile = ntile(speakerRT, 3)) %>%
+  mutate(Level = case_when(speaker_tertile == 1 ~ "Easy", 
+                           speaker_tertile == 2 ~ "Medium",
+                           TRUE ~ "Hard"))
 ```
 
-# specific wordpair-level parameters
+## stats for level differences in accuracy
 
 ```{r}
-wordpair_params = speaker %>% group_by(wordpair) %>% 
+car::Anova(lm(data=listener, accuracy ~ Level))
+listener %>% group_by(Level) %>% summarise(mean(accuracy))
+```
+
+## merge into speaker dataframe 
+
+```{r}
+# generate speaker_df from `models/run_parallel.sh` 
+# or download from OSF (https://osf.io/8zgja)
+speaker <- read_csv(here("data/exp1/model_output/speaker_df.csv")) %>% 
+  select(-Level) %>%
+  left_join(listener %>% select(wordpair, Level)) %>%
+  mutate(Level = as.factor(Level)) %>%
+  mutate(Level = fct_relevel(Level, "Easy", "Medium", "Hard")) %>%
+  mutate(type = case_when(costweight == 0 ~ "no search",
+                          costweight == 1 ~ "no pragmatics",
+                          TRUE ~ "search + pragmatics")) 
+```
+
+# Model comparison
+
+## calculate optimal wordpair-level parameters
+
+```{r}
+wordpair_params <- speaker %>% 
+  group_by(wordpair) %>% 
   mutate(LL = log(prob)) %>%
   group_by(wordpair, Level, model, alpha, cost_fn, costweight) %>%
   summarise(sumLL = sum(LL, na.rm = TRUE)) %>%
   ungroup() %>%
   group_by(wordpair) %>%
-  filter(sumLL == max(sumLL))
+  filter(sumLL == max(sumLL)) %>%
+  select(wordpair, alpha, cost_fn, costweight)
 
-# for exp1 vs. exp2 comparison
-# identify pairs where boards changed
-exp1_params = read_csv('../data/exp2/model_input/example_params.csv') %>%
+# identify pairs where boards changed for exp1 vs. exp2 comparison
+here('data/exp2/model_input/example_params.csv') %>%
+  read_csv() %>%
   select(wordpair, collapsed_clues) %>%
-  left_join(wordpair_params %>% select(wordpair, alpha, cost_fn, costweight))
-
-write.csv(exp1_params,
-          file = "../data/exp1/model_input/example_params.csv",
-          row.names = FALSE)
+  left_join(wordpair_params) %>%
+  write.csv(file = here("data/exp1/model_input/example_params.csv"),
+            row.names = FALSE)
 ```
 
-# model comparison plot
-```{r}
-beste1_models = speaker %>%
-  filter(model %in% c("RSAcdf", "RSAfreq"))%>%
-  mutate(type = ifelse(costweight == 0, "no search",
-          ifelse(costweight == 1, "no pragmatics","search + pragmatics"))) %>%
-  mutate(LL = log(prob)) %>%
-  group_by(type, Level, model, alpha, cost_fn, costweight) %>%
-  summarise(sumLL = sum(LL, na.rm = TRUE)) %>%
-  ungroup() %>%
-  group_by(type,Level, cost_fn ) %>%
-  filter(sumLL == max(sumLL))
+# model comparison plot (Figure 1)
 
-beste1_models %>%
-  ggplot(aes(x = as.numeric(cost_fn), y = sumLL)) +
-  geom_line(stat = 'identity', data = . %>% filter(model == 'RSAcdf'),
-            aes(group = type, color = type)) +
-  geom_hline(aes(yintercept = sumLL, color = type), 
+```{r}
+beste1_models <- speaker %>%  
+  group_by(type, Level, model, alpha, cost_fn, costweight) %>%
+  summarise(LL = sum(log(prob), na.rm = TRUE)) %>%
+  group_by(type, Level, cost_fn) %>%
+  filter(LL == max(LL))
+
+ggplot(beste1_models, aes(x = as.numeric(cost_fn), y = LL)) +
+  geom_line(aes(group = type, color = type),
+            stat = 'identity', 
+            data = . %>% filter(model == 'RSAcdf')) +
+  geom_hline(aes(yintercept = LL, color = type), 
              linetype = 'dashed', 
              data = . %>% filter(model == 'RSAfreq' & type != "no search")) +
-  geom_point(data = . %>% group_by(Level) %>% filter(sumLL == max(sumLL)))+
+  geom_point(data = . %>% group_by(Level) %>% filter(LL == max(LL)))+
   facet_wrap(~ Level, scales = 'free')+
   scale_x_log10(limits = c(1, 10000)) +
   scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
-    theme_few() +
-    labs(x = "search budget", y = "log likelihood") +
-    theme(aspect.ratio = 1)
+  theme_few() +
+  labs(x = "search budget", y = "log likelihood") +
+  theme(aspect.ratio = 1)
 
-ggsave(here('plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width = 10)
+ggsave(here('analysis/plots/exp1_modelcomparison.pdf'), 
+       units = 'in', height = 3, width = 10)
 ```
 
 # table 2 results
 
 ```{r}
-best_models_df = beste1_models %>%
+best_models_df <- beste1_models %>%
   mutate(type = as.factor(type)) %>%
-  mutate(type = fct_relevel(type, "search + pragmatics", "no pragmatics", "no search")) %>%
+  mutate(type = fct_relevel(
+    type, "search + pragmatics", "no pragmatics", "no search"
+  )) %>%
   filter(model == "RSAcdf" | 
         (model == 'RSAfreq' & type != "no search")) %>%
   group_by(Level,type, model) %>%
-  filter(sumLL == max(sumLL)) %>%
+  filter(LL == max(LL)) %>%
   arrange(Level, model) %>%
-    slice_head()
+  slice_head()
 
 View(best_models_df) 
 ```
@@ -115,22 +131,22 @@ View(best_models_df)
 # ratio tests
 
 ```{r}
-
 key_comparison_models = best_models_df %>% 
   filter(type == "search + pragmatics" | 
-    (type == "no pragmatics" & model == "RSAcdf" ) |
-      (type == "no search"))
+        (type == "no pragmatics" & model == "RSAcdf" ) |
+        (type == "no search"))
   
-filtered_df <- inner_join(speaker, key_comparison_models, 
-                by = c("Level", "model", "alpha", "cost_fn", "costweight")) %>%
-  mutate(type = ifelse(costweight == 0, "no search",
-          ifelse(costweight == 1, "no pragmatics","search + pragmatics"))) %>%
+filtered_df <- inner_join(
+    speaker, key_comparison_models, 
+    by = c("Level", "model", "alpha", "cost_fn", "costweight")
+  ) %>%
   unite("key", c(type, model), sep = "-")
 
 ## verify 
 filtered_df %>% 
   group_by(Level, key) %>%
   summarise(sumLL = sum(log(prob), na.rm = TRUE))
+
 ## declare functions
 calculate_log_likelihood <- function(data) {
   data %>%
@@ -144,39 +160,46 @@ perform_lrt <- function(log_likelihood1, log_likelihood2, df = 1) {
   lr_statistic <- -2 * (log_likelihood1 - log_likelihood2)
   # Compute the p-value
   p_value <- pchisq(lr_statistic, df = df, lower.tail = FALSE)
-  
   return(list(lr_statistic = lr_statistic, p_value = p_value))
 }
 
 # Function to compare models for each level
 compare_models_by_level <- function(data) {
   log_likelihoods <- calculate_log_likelihood(data)
-  
+
+  full <- log_likelihoods %>% 
+    filter(key == "search + pragmatics-RSAcdf") %>% 
+    pull(log_likelihood)
+
+  no_prag <- log_likelihoods %>% 
+    filter(key == "no pragmatics-RSAcdf") %>% 
+    pull(log_likelihood),
+
+  no_search <- log_likelihoods %>% 
+    filter(key == "no search-RSAcdf") %>% 
+    pull(log_likelihood)
+
+  freq <- log_likelihoods %>% 
+    filter(key == "search + pragmatics-RSAfreq") %>% 
+    pull(log_likelihood)
+
   # Perform pairwise LRTs between models
-  full_vs_freq <-  perform_lrt(log_likelihoods %>% 
-                  filter(key == "search + pragmatics-RSAfreq") %>% pull(log_likelihood),
-                                  log_likelihoods%>% 
-                filter(key == "search + pragmatics-RSAcdf") %>% pull (log_likelihood))
-  
-  full_vs_nosearch <-  perform_lrt(log_likelihoods %>% 
-                  filter(key == "no search-RSAcdf") %>% pull(log_likelihood),
-                                  log_likelihoods%>% 
-                filter(key == "search + pragmatics-RSAcdf") %>% pull (log_likelihood))
-  
-  full_vs_noprag <-  perform_lrt(log_likelihoods %>% 
-                  filter(key == "no pragmatics-RSAcdf") %>% pull(log_likelihood),
-                                  log_likelihoods%>% 
-                filter(key == "search + pragmatics-RSAcdf") %>% pull (log_likelihood))
+  full_vs_freq <-  perform_lrt(freq, full)  
+  full_vs_nosearch <- perform_lrt(no_search, full)
+  full_vs_noprag <- perform_lrt(no_prag, full)
   
   # Combine results into a data frame
-  results <- tibble(
-    comparison = c("full_vs_freq", "full_vs_nosearch", "full_vs_noprag"),
-    lr_statistic = c(full_vs_freq$lr_statistic, full_vs_nosearch$lr_statistic,
+  return(tibble(
+    comparison = c("full_vs_freq", 
+                   "full_vs_nosearch", 
+                   "full_vs_noprag"),
+    lr_statistic = c(full_vs_freq$lr_statistic, 
+                     full_vs_nosearch$lr_statistic,
                      full_vs_noprag$lr_statistic),
-    p_value = c(full_vs_freq$p_value, full_vs_nosearch$p_value,
-                full_vs_noprag$p_value))
-  
-  return(results)
+    p_value = c(full_vs_freq$p_value, 
+                full_vs_nosearch$p_value,
+                full_vs_noprag$p_value)
+  ))
 }
 
 # Apply the comparison function to each level
@@ -187,7 +210,6 @@ comparison_results <- filtered_df %>%
 
 # View the results
 View(comparison_results)
-
 ```
 
 # cost heatmap (Figure S5)
@@ -195,9 +217,6 @@ View(comparison_results)
 ```{r}
 plotdata = speaker %>%
   filter(model == "RSAcdf") %>%
-  mutate(modeltype = ifelse(costweight == 1, "no pragmatics",
-          ifelse(costweight == 0, "no search", "search + pragmatics"))) %>%
-  #filter(modeltype != "no search") %>%
   group_by(Level, model, alpha, cost_fn, costweight) %>%
   summarize(loglik = sum(log(prob), na.rm = T)) %>%
   rename(budget = cost_fn) %>% 
@@ -206,24 +225,25 @@ plotdata = speaker %>%
   ungroup()
 
 plotdata %>%
-  # Filter out costweight = 0 for the heatmap
   filter(costweight != 0) %>%
   ggplot(aes(x = costweight, y = as.numeric(budget), fill = loglik)) +
     geom_tile(stat = 'identity', height = .34, width = .33) +
-    geom_tile(color = 'black', stat = 'identity', height = .34, width = .33, size = 1.1,
+    geom_tile(color = 'black', stat = 'identity', 
+              height = .34, width = .33, size = 1.1,
               data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
-    facet_grid(~Level) +
+    facet_grid(~ Level) +
     scale_x_continuous(breaks = c(0, .32, .64, 1), 
                        labels = function(x) sprintf("%.2g", x)) + 
     scale_y_log10() +
-    # Add vertical lines for costweight = 0
-    geom_vline(data = plotdata %>% filter(costweight == 0), 
-               aes(xintercept = costweight), color = "forestgreen", linetype = "dashed", size = 1.2) +
+    geom_vline(aes(xintercept = costweight),
+               data = plotdata %>% filter(costweight == 0), 
+               color = "forestgreen", linetype = "dashed", size = 1.2) +
     scale_fill_gradient2(midpoint = -4250) +
     theme_few() +
     labs(y = "search budget", x = expression(beta))
 
-ggsave(here("plots/exp1_heatmap.pdf"), units = 'in', width = 8, height = 3)
+ggsave(here("analysis/plots/exp1_heatmap.pdf"), 
+       units = 'in', width = 8, height = 3)
 ```
 
 # Appendix A: Blended model
@@ -268,16 +288,16 @@ blended %>%
 blended %>%
   ggplot(aes(x = as.numeric(step), y = loglik,
              color = bias_weight, group = bias_weight)) +
-    geom_line(aes(linetype = bias_weight %in% c(0,1), 
-                  alpha = bias_weight %in% c(0, 0.01, 1)), 
-              show.legend = c(colour = TRUE, linetype = FALSE, alpha=FALSE)) +
-    facet_wrap(Level ~ ., scales = 'free') +
-    scale_x_log10() +
-    theme_few() +
-    labs(x = "search budget", y = "log likelihood", color = "bias") +
-    theme(aspect.ratio = 1, legend.position = 'right')
+  geom_line(aes(linetype = bias_weight %in% c(0,1), 
+                alpha = bias_weight %in% c(0, 0.01, 1)), 
+            show.legend = c(colour = TRUE, linetype = FALSE, alpha=FALSE)) +
+  facet_wrap(Level ~ ., scales = 'free') +
+  scale_x_log10() +
+  theme_few() +
+  labs(x = "search budget", y = "log likelihood", color = "bias") +
+  theme(aspect.ratio = 1, legend.position = 'right')
 
-ggsave(here('plots/appendixA_blended.pdf'), height = 5, width = 8)
+ggsave(here('analysis/plots/appendixA_blended.pdf'), height = 5, width = 8)
 ```
 
 ## examine CDFs
@@ -296,5 +316,5 @@ blended_raw %>%
     labs(x = "search budget") +
     theme(aspect.ratio = 1, legend.position = 'none')
 
-ggsave(here('plots/appendixA_lion-tiger-cdfs.pdf'), height = 15, width = 15)
+ggsave(here('analysis/plots/appendixA_lion-tiger-cdfs.pdf'), height = 15, width = 15)
 ```

@@ -477,7 +477,8 @@ ggsave(here('plots/exp4_modelcomparison.pdf'), units = 'in', height = 3, width =
 pairs = exp4_newlevels %>% pull(wordpair) %>% unique()
 clues <- read_csv(here('./data/exp4/cleaned_complete.csv')) %>%
   group_by(wordpair, seqOrder, correctedClue) %>%
-  tally(name = 'clueCount')
+  tally(name = 'clueCount') %>%
+  filter(seqOrder == 'clueFinal')
 
 getWalks <- function(pair) {
   paste0('./data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
@@ -511,8 +512,9 @@ walks <- map(pairs, getWalks, .progress = T) %>%
   list_rbind() 
 
 d.spearmancor <- walks %>%
-  left_join(clues) %>%
-  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal'))%>%
+  left_join(clues %>% filter(seqOrder == 'clueFinal'), 
+            by = c('wordpair', 'correctedClue')) %>%
+  filter(!is.na(seqOrder)) %>%
   group_by(wordpair, seqOrder, step) %>%
   summarize(r = cor(cdf, clueCount, method = 'spearman')) %>%
   left_join(exp4_newlevels %>% select(wordpair, level)) 
@@ -521,9 +523,7 @@ d.spearmancor.toplot <- d.spearmancor %>%
   ungroup() %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
   group_by(step, level) %>%
-  summarize(ci_lower = mean(r) - 2*sd(r)/sqrt(length(r)),
-            ci_upper= mean(r) + 2*sd(r)/sqrt(length(r)),
-            r = mean(r)) 
+  summarize(r = mean(r, na.rm=FALSE)) 
 
 d.spearmancor.toplot %>%
   ungroup() %>%
@@ -549,6 +549,16 @@ d.spearmancor %>%
   summarize(r = mean(r)) %>% 
   group_by(level) %>% 
   filter(r == max(r)) 
+```
+
+## CDFs
+
+```{r}
+walks %>%
+  filter(wordpair == 'lion-tiger') %>%
+  ggplot(aes(x = step, y = cdf, group = correctedClue)) +
+    geom_line() +
+    theme_few()
 ```
 
 ## Examine how far you have to go to find clue
