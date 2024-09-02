@@ -65,7 +65,7 @@ class SWOW:
         self.rw = pickle.load(f)
     else :
       indices = self.get_nodes_by_word(self.target_words)
-      self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices, alpha = 0.2)
+      self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices, alpha = 0)
       with open(f'{exp_path}/model_input/walks.pkl', 'wb') as f:
         pickle.dump(self.rw, f)
 
@@ -99,10 +99,10 @@ class SWOW:
       w2_walks = np.array([x for x in self.rw if x[0] == self.get_nodes_by_word([word2])])
       d = {f'walk-{int(2*i)}': self.get_words_by_node(w1_walks[i]) for i in range(1000)}
       d.update({f'walk-{int(2*i+1)}': self.get_words_by_node(w2_walks[i]) for i in range(1000)})
-      with open(f'{exp_path}/model_output/{word1}-{word2}-walks.json', 'w', encoding ='utf8') as json_file:
+      with open(f'{exp_path}/model_output/walks/{word1}-{word2}-walks.json', 'w', encoding ='utf8') as json_file:
         json.dump(d, json_file, ensure_ascii = False)
 
 if __name__ == "__main__":
   np.random.seed(1235)
-  swow_exp1 = SWOW('../data/exp1')
-  swow_exp1.save_candidates('../data/exp1')
+  swow_exp4 = SWOW('../data/exp4')
+  swow_exp4.save_candidates('../data/exp4')

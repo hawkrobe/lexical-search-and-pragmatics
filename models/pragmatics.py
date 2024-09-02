@@ -4,6 +4,7 @@ import pickle
 import itertools
 import warnings
 import scipy
+import argparse
 
 import pandas as pd
 import numpy as np
@@ -15,20 +16,13 @@ from scipy.special import softmax
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class Selector:
-  def __init__(
-      self,
-      exp_path,
-      cost_type = 'none',
-      inf_type = 'RSA',
-      alpha = 20,
-      costweight = 0
-    ) :
+  def __init__(self, exp_path, args) :
 
     # handle parameters
-    self.cost_type = cost_type
-    self.inf_type = inf_type
-    self.alpha = alpha
-    self.costweight = costweight
+    self.cost_type = args.cost_type
+    self.inf_type = args.inf_type
+    self.alpha = args.alpha
+    self.costweight = args.costweight
 
     # read in metadata
     self.exp_path = exp_path
@@ -113,15 +107,12 @@ class Selector:
     '''
     literal guesser probability over each wordpair
     '''
-    return softmax(50*self.sims[boardname], axis = 0)
+    return softmax(20*self.sims[boardname], axis = 0)
 
   @lru_cache(maxsize=None)
   def diagnosticity(self, boardname, targetpair_idx) :
     if self.inf_type == 'RSA' :
       return self.literal_guesser(boardname)[targetpair_idx].ravel()
-    elif self.inf_type == 'additive' :
-      distractors = np.delete(self.sims[boardname], targetpair_idx, axis=0)
-      return -np.max(distractors, axis=0) if len(distractors) > 0 else np.zeros(len(self.vocab))
     elif self.inf_type == 'no_prag' :
       return 0
 
@@ -137,9 +128,10 @@ class Selector:
     flipped = 0 if targetpair in list(self.cost[cost_fn].keys()) else 1
     cost = self.cost[cost_fn][targetpair].ravel() if not flipped else self.cost[cost_fn][flipped_targetpair].ravel()
     utility = (1 - self.costweight) * inf - self.costweight * cost
+    # TODO: remove targetpair words from clueset
     return softmax(self.alpha * utility[clueset])
 
-  def get_speaker_df(self, clues_only = False):
+  def get_speaker_df(self):
     '''
     returns a complete dataframe of pragmatic speaker ranks & probabilities over different representations
     over a given set of candidates
@@ -157,7 +149,7 @@ class Selector:
         targetpair = row['wordpair']
         boarddata = self.cluedata.copy().query("wordpair == @targetpair and boardnames == @boardname")
         vocab = list(self.vocab["Word"])
-        clue_indices = [vocab.index(word) for word in boarddata['correctedClue'] if word in vocab] if clues_only else range(len(vocab))
+        clue_indices = [vocab.index(word) for word in boarddata['correctedClue'] if word in vocab]
         clueset = self.vocab["Word"][clue_indices]
         y = self.pragmatic_speaker(targetpair, boardname, cost_fn, clue_indices)
         speaker_probs = [
@@ -194,121 +186,86 @@ class Selector:
       boards.append(boarddata)
     return pd.concat(boards)
 
-  def get_spearman(self, params) :
-    softplus = lambda x: np.log1p(np.exp(x))
-    self.alpha = 1         # alpha is irrelevant because spearman only looks at ranks
-    self.costweight = 0    # fix costweight at 0 for the purposes of exp 3 comparison
-    self.distweight = params[0]
-    df = self.get_speaker_df(clues_only=False)
-    combo = self.human_df.merge(df, on=['wordpair', 'correctedClue'])
-    combo.loc[:, 'prob_numeric'] = pd.to_numeric(combo['prob'], errors = 'coerce')
-    corr = (combo.groupby(['cost_fn']).apply(
-      lambda d: d['prob_numeric'].corr(d['response'], method='spearman')
-    ).max())
-    print(self.alpha, self.costweight, '(', self.distweight, ')', ':', corr)
-    return -corr
-
-  def optimize(self, fn) :
-    self.human_df = pd.read_csv(f"{self.exp_path}/model_input/human-ratings.csv")
-    return scipy.optimize.brute(selector.get_spearman, (slice(0,1.1,.1),))
-
   def print_examples(self, targets, cost_fn_fit) :
     # find the board with the target wordpair
     boardname = self.targets.query("wordpair == @targets")['boardnames'].values[0]
     print('board:', boardname)
     target_idx = list(selector.board_combos[boardname]['wordpair']).index(targets)
-    fit = selector.fit(boardname, target_idx)
     diag = selector.diagnosticity(boardname, target_idx)
-    inf = selector.informativity(boardname, target_idx)
-    cost = selector.cost[cost_fn_fit]['lion-tiger']
-    utility = selector.pragmatic_speaker(targets, boardname, cost_fn_fit, range(len(selector.vocab)))
-    #print('clue, fit, diagnositicity, cost, speaker prob')
-    for word in ['poison', 'death', 'burn', 'hiss'] :
-    #for word in ['cat','feline', 'animal','mammal', 'claws', 'hiss',] :
+    cost = selector.cost[cost_fn_fit][targets]
+    speaker_prob = selector.pragmatic_speaker(targets, boardname, cost_fn_fit, range(len(selector.vocab)))
+    clue_list = ['poison', 'death', 'burn', 'hiss'] if targets == 'snake-ash' \
+      else ['cat','feline', 'animal','mammal', 'claws', 'hiss', 'crawl', 'fangs', 'back']
+    for word in clue_list :
       idx = list(selector.vocab["Word"]).index(word)
-      #print(word, ':', fit[idx], diag[idx], cost[idx], utility[idx])
-      print(f"clue: {word},  cost: {cost[idx]}, diag: {diag[idx]},  utility: {utility[idx]}")
-      # distractor_pairs = np.delete(list(self.board_combos[boardname]['wordpair']), target_idx, axis=0)
-      # distractors = np.delete(self.sims[boardname], target_idx, axis=0)
-      # print('biggest distractor', distractor_pairs[np.argmax(distractors,axis=0)[idx]])
-    
+      print(f"clue: {word},  cost: {cost[idx]}, diag: {diag[idx]},  speaker_prob: {speaker_prob[idx]}")
+
   def print_multiple_examples(self, targets, cost_fn_fit, clues):
     # find the board with the target wordpair
       boardname = self.targets.query("wordpair == @targets")['boardnames'].values[0]
-      
       target_idx = list(selector.board_combos[boardname]['wordpair']).index(targets)
-    
       diag = selector.diagnosticity(boardname, target_idx)
-      
       cost = selector.cost[cost_fn_fit][targets]
       utility = selector.pragmatic_speaker(targets, boardname, cost_fn_fit, range(len(selector.vocab)))
       
       # create df with wordpair column only
       target_df = pd.DataFrame()
-      
-
       for word in clues:
         if word not in list(selector.vocab["Word"]):
-          target_df = target_df.append({'wordpair': targets, 'clue': word, 'cost': 'NA', 'diag': 'NA', 'utility': 'NA'}, ignore_index=True)
+          target_df = target_df.append({
+            'wordpair': targets, 'clue': word, 'cost': 'NA',
+            'diag': 'NA', 'utility': 'NA'
+          }, ignore_index=True)
         else:
           idx = list(selector.vocab["Word"]).index(word)
-          # add wordpair, word, cost, diag, utility to df
-          target_df = target_df.append({'wordpair': targets, 'clue': word, 'cost': cost[idx], 'diag': diag[idx], 'utility': utility[idx]}, ignore_index=True)
+          target_df = target_df.append({
+            'wordpair': targets, 'clue': word, 'cost': cost[idx],
+            'diag': diag[idx], 'utility': utility[idx]
+          }, ignore_index=True)
       return target_df
-        
 
 if __name__ == "__main__":
 
+  parser = argparse.ArgumentParser(description='Calculate speaker probabilities.')
+  parser.add_argument('--cost_type', type=str)
+  parser.add_argument('--inf_type', type=str)
+  parser.add_argument('--alpha', type=int)
+  parser.add_argument('--costweight', type=float)
+  parser.add_argument('--pid', type=int)
+  parser.add_argument('--examples', action='store_true')
+  args = parser.parse_args()
 
-  #exp_path = '../data/exp1/'
-  #selector = Selector(exp_path, sys.argv[1:])
-  #selector.print_examples()
-  # out = selector.get_speaker_df()
-  # out.to_csv(
-  #   f'{exp_path}/model_output/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
-  # )
+  if not args.examples :
+    exp_path = '../data/exp1/'
+    Selector('../data/exp1/', args).get_speaker_df().to_csv(
+      f'{exp_path}/model_output/speaker_df_{args.cost_type}_{args.inf_type}_{args.pid}.csv'
+    )
+  else :
+    # make Table 1
+    print("Experiment 1: Full Experiment")
+    selector = Selector('../data/exp1/', cost_type = 'cdf', inf_type = 'RSA', alpha = 12, costweight = 0.32)
+    selector.print_examples('lion-tiger', 512)
+    selector = Selector('../data/exp1/', cost_type = 'cdf', inf_type = 'RSA', alpha = 12, costweight = 0.32)
+    selector.print_examples('snake-ash', 512)
 
-  #exp_path = '../data/exp2/'
-  # selector = Selector(exp_path, sys.argv[1:])
+    print("Experiment 2: Ratings")
+    selector = Selector('../data/exp2/', cost_type = 'cdf', inf_type = 'RSA', alpha = 2, costweight = 0.36)
+    selector.print_examples('lion-tiger', 2048)
+    selector = Selector('../data/exp2/', cost_type = 'cdf', inf_type = 'RSA', alpha = 2, costweight = 0.06)
+    selector.print_examples('snake-ash', 512)
 
-  # # find optimal parameters
-  # #selector.optimize('spearman')
-  # out = selector.get_speaker_df()
-  # out.to_csv(
-  #   f'{exp_path}/model_output/nocostgrid/speaker_df_{selector.cost_type}_{selector.inf_type}_{sys.argv[6]}.csv'
-  # )
-
-  # try out example
-  # params is organized as [cost_type, inf_type, alpha, costweight, distweight]
-  
-  # print("Experiment 1: Full Experiment")
-  # # for lion-tiger
-  # # selector = Selector('../data/exp1/', ['cdf', 'RSA', 32, 0.16, 0])
-  # # selector.print_examples('lion-tiger', 256)
-  # # for snake-ash
-  # selector = Selector('../data/exp1/', ['cdf', 'RSA', 32, 0.32, 0])
-  # selector.print_examples('snake-ash', 256)
-  # print("Experiment 2: Ratings")
-  # # selector = Selector('../data/exp2/', ['cdf', 'RSA', 2, 0.36, 0])
-  # # selector.print_examples('lion-tiger', 2048)
-  # # for snake-ash
-  # selector = Selector('../data/exp1/', ['cdf', 'RSA', 2, 0.06, 0])
-  # selector.print_examples('snake-ash', 512)
-
-  ## multiple examples
-  exp_path = '../data/exp1'
-  pairs = pd.read_csv(f"{exp_path}/model_input/example_params.csv")
-  compiled_df = pd.DataFrame()
-  for index, row in pairs.iterrows() :
-    targets = row['wordpair']
-    cost_fn_fit = row['cost_fn']
-    alpha = row['alpha']
-    costweight = row['costweight']
-    clues = row['collapsed_clues'].split(', ')
-    print(f"target: {targets}, cost_fn: {cost_fn_fit}, alpha: {alpha}, costweight: {costweight}, clues: {clues}")
-
-    selector = Selector(exp_path, cost_type = 'cdf', inf_type = 'RSA', alpha = alpha, costweight = costweight)
-    target_df = selector.print_multiple_examples(targets, cost_fn_fit, clues)
-    compiled_df = pd.concat([compiled_df, target_df])
-
-  compiled_df.to_csv(f'{exp_path}/model_output/multiple_examples.csv')
+    ## Make Supplemental Figure
+    for exp_path in ['../data/exp1', '../data/exp2'] :
+      pairs = pd.read_csv(f"{exp_path}/model_input/example_params.csv")
+      compiled_df = pd.DataFrame()
+      for index, row in pairs.iterrows() :
+        targets = row['wordpair']
+        cost_fn_fit = row['cost_fn']
+        alpha = row['alpha']
+        costweight = row['costweight']
+        clues = row['collapsed_clues'].split(', ')
+        print(f"target: {targets}, cost_fn: {cost_fn_fit}, alpha: {alpha}, costweight: {costweight}, clues: {clues}")
+        selector = Selector(exp_path, cost_type = 'cdf', inf_type = 'RSA', alpha = alpha, costweight = costweight)
+        target_df = selector.print_multiple_examples(targets, cost_fn_fit, clues)
+        compiled_df = pd.concat([compiled_df, target_df])
+      compiled_df.to_csv(f'{exp_path}/model_output/multiple_examples.csv')
