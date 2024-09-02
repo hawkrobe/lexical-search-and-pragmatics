@@ -24,8 +24,7 @@ library(jsonlite)
 ```{r}
 exp1_speaker_df <- read_csv(here("data/exp1/model_output/speaker_df.csv"))
 
-# recompute levels based on listener accuracy
-
+# recompute levels based on speaker RT
 listener = read_csv(here("../data/exp1/raw_listener.csv")) %>%
   unite("wordpair", Word1, Word2, sep = "-") %>% 
   group_by(wordpair) %>%
@@ -45,6 +44,7 @@ speaker = exp1_speaker_df %>% select(-Level) %>%
 ```
 
 # specific wordpair-level parameters
+
 ```{r}
 wordpair_params = speaker %>% group_by(wordpair) %>% 
   mutate(LL = log(prob)) %>%
@@ -54,11 +54,8 @@ wordpair_params = speaker %>% group_by(wordpair) %>%
   group_by(wordpair) %>%
   filter(sumLL == max(sumLL))
 
-
-## for exp1 vs. exp2 comparison
-
+# for exp1 vs. exp2 comparison
 # identify pairs where boards changed
-
 exp1_params = read_csv('../data/exp2/model_input/example_params.csv') %>%
   select(wordpair, collapsed_clues) %>%
   left_join(wordpair_params %>% select(wordpair, alpha, cost_fn, costweight))
@@ -100,13 +97,13 @@ ggsave(here('plots/exp1_modelcomparison.pdf'), units = 'in', height = 3, width =
 ```
 
 # table 2 results
-```{r}
 
+```{r}
 best_models_df = beste1_models %>%
-       mutate(type = as.factor(type)) %>%
-       mutate(type = fct_relevel(type, "search + pragmatics", "no pragmatics", "no search")) %>%
-       filter(model == "RSAcdf" | 
-                (model == 'RSAfreq' & type != "no search")) %>%
+  mutate(type = as.factor(type)) %>%
+  mutate(type = fct_relevel(type, "search + pragmatics", "no pragmatics", "no search")) %>%
+  filter(model == "RSAcdf" | 
+        (model == 'RSAfreq' & type != "no search")) %>%
   group_by(Level,type, model) %>%
   filter(sumLL == max(sumLL)) %>%
   arrange(Level, model) %>%
@@ -193,7 +190,8 @@ View(comparison_results)
 
 ```
 
-# cost heatmap
+# cost heatmap (Figure S5)
+
 ```{r}
 speaker %>%
   filter(model == "RSAcdf") %>%
@@ -251,7 +249,7 @@ blended_raw <- read_csv(here("data/exp1/model_output/blended.csv")) %>%
 ```{r}
 blended <- blended_raw %>%
   group_by(wordpair, step,  bias_weight) %>%
-  mutate(prob = softmax(8 * cdf)) %>%
+  mutate(prob = softmax(6 * cdf)) %>%
   ungroup() %>%
   right_join(d_exp1, relationship = "many-to-many") %>%
   filter(!is.na(bias_weight)) %>%
