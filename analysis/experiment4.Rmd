@@ -426,6 +426,46 @@ ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
 
 # Model results
 
+## basic model
+
+```{r}
+exp4_speaker_df <- read_csv(here("../data/exp4/model_output/speaker_df.csv")) 
+
+speaker = exp4_speaker_df%>%
+  select(-Level) %>% left_join(exp4_newlevels) %>%
+  mutate(level = as.factor(level)) %>%
+  mutate(level = fct_relevel(level, "Easy", "Medium", "Hard"))
+  
+beste4_models = speaker %>%
+  filter(model %in% c("RSAcdf", "RSAfreq"))%>%
+  mutate(type = ifelse(costweight == 0, "no search",
+          ifelse(costweight == 1, "no pragmatics","search + pragmatics"))) %>%
+  mutate(LL = log(prob)) %>%
+  group_by(type, level, model, alpha, cost_fn, costweight) %>%
+  summarise(sumLL = sum(LL, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(type,level, cost_fn ) %>%
+  filter(sumLL == max(sumLL))
+
+beste4_models %>%
+  ggplot(aes(x = as.numeric(cost_fn), y = sumLL)) +
+  geom_line(stat = 'identity', data = . %>% filter(model == 'RSAcdf'),
+            aes(group = type, color = type)) +
+  geom_hline(aes(yintercept = sumLL, color = type), 
+             linetype = 'dashed', 
+             data = . %>% filter(model == 'RSAfreq' & type != "no search")) +
+  geom_point(data = . %>% group_by(level) %>% filter(sumLL == max(sumLL)))+
+  facet_wrap(~ level, scales = 'free')+
+  scale_x_log10(limits = c(1, 10000)) +
+  scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
+    theme_few() +
+    labs(x = "search budget", y = "log likelihood") +
+    theme(aspect.ratio = 1)
+
+ggsave(here('plots/exp4_modelcomparison.pdf'), units = 'in', height = 3, width = 10)
+```
+
+
 ## Examine example walks
 
 ```{r}
