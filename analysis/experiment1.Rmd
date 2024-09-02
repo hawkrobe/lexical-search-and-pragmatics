@@ -193,34 +193,37 @@ View(comparison_results)
 # cost heatmap (Figure S5)
 
 ```{r}
-speaker %>%
+plotdata = speaker %>%
   filter(model == "RSAcdf") %>%
   mutate(modeltype = ifelse(costweight == 1, "no pragmatics",
           ifelse(costweight == 0, "no search", "search + pragmatics"))) %>%
-  filter(modeltype != "no search") %>%
-  group_by(modeltype, Level, model, alpha, cost_fn, costweight) %>%
+  #filter(modeltype != "no search") %>%
+  group_by(Level, model, alpha, cost_fn, costweight) %>%
   summarize(loglik = sum(log(prob), na.rm = T)) %>%
   rename(budget = cost_fn) %>% 
-  group_by(Level, modeltype, budget, costweight) %>%
-  #mutate(loglik = ifelse(loglik < -5000, -5000, loglik)) %>%
+  group_by(Level, costweight, budget) %>%
   filter(loglik == max(loglik)) %>%
-  ungroup() %>%
-  # complete(Level, modeltype, budget, costweight, fill = list(loglik = NA)) %>%
-  # group_by(Level, modeltype, costweight) %>%
-  # mutate(loglik = ifelse(is.na(loglik), mean(loglik, na.rm = T), loglik)) %>%
+  ungroup()
+
+plotdata %>%
+  # Filter out costweight = 0 for the heatmap
+  filter(costweight != 0) %>%
   ggplot(aes(x = costweight, y = as.numeric(budget), fill = loglik)) +
-    geom_tile(stat = 'identity', height=.34, width=.33) +
-    geom_tile(color = 'black', stat = 'identity', height=.34, width=.33, size = 1.1,
+    geom_tile(stat = 'identity', height = .34, width = .33) +
+    geom_tile(color = 'black', stat = 'identity', height = .34, width = .33, size = 1.1,
               data = . %>% group_by(Level) %>% filter(loglik == max(loglik))) +
-    facet_grid(Level ~ modeltype) +
-    scale_x_log10() +
+    facet_grid(~Level) +
+    scale_x_continuous(breaks = c(0, .32, .64, 1), 
+                       labels = function(x) sprintf("%.2g", x)) + 
     scale_y_log10() +
+    # Add vertical lines for costweight = 0
+    geom_vline(data = plotdata %>% filter(costweight == 0), 
+               aes(xintercept = costweight), color = "forestgreen", linetype = "dashed", size = 1.2) +
     scale_fill_gradient2(midpoint = -4250) +
     theme_few() +
-    labs(y = "search budget", "cost weight") +
-    theme(aspect.ratio = 1)
+    labs(y = "search budget", x = expression(beta))
 
-ggsave(here("plots/exp1_heatmap.pdf"), units = 'in', width = 6, height = 5)
+ggsave(here("plots/exp1_heatmap.pdf"), units = 'in', width = 8, height = 3)
 ```
 
 # Appendix A: Blended model
