@@ -25,14 +25,14 @@ class Selector:
     self.costweight = args.costweight
 
     # read in metadata
-    self.exp_path = exp_path
-    self.vocab = pd.read_csv(f"{exp_path}/model_input/vocab.csv")
-    self.targets = pd.read_csv(f"{exp_path}/targets.csv")
-    self.cluedata = pd.read_csv(f"{exp_path}/cleaned.csv")
+    self.exp_path = f"../data/{args.experiment}"
+    self.vocab = pd.read_csv(f"{self.exp_path}/model_input/vocab.csv")
+    self.targets = pd.read_csv(f"{self.exp_path}/targets.csv")
+    self.cluedata = pd.read_csv(f"{self.exp_path}/cleaned.csv")
     self.embeddings = (
-      pd.read_csv(f"{exp_path}/model_input/swow_embeddings.csv").transpose().values
+      pd.read_csv(f"{self.exp_path}/model_input/swow_embeddings.csv").transpose().values
     )
-    with open(f'{exp_path}/boards.json', 'r') as json_file:
+    with open(f'{self.exp_path}/boards.json', 'r') as json_file:
       self.boards = json.load(json_file)
 
     # initialize/cache objects
@@ -227,6 +227,7 @@ class Selector:
 if __name__ == "__main__":
 
   parser = argparse.ArgumentParser(description='Calculate speaker probabilities.')
+  parser.add_argument('--experiment', type=int)
   parser.add_argument('--cost_type', type=str)
   parser.add_argument('--inf_type', type=str)
   parser.add_argument('--alpha', type=int)
@@ -235,24 +236,13 @@ if __name__ == "__main__":
   parser.add_argument('--examples', action='store_true')
   args = parser.parse_args()
 
+  selector = Selector(args)
   if not args.examples :
-    exp_path = '../data/exp1/'
-    Selector('../data/exp1/', args).get_speaker_df().to_csv(
+    selector.get_speaker_df().to_csv(
       f'{exp_path}/model_output/speaker_df_{args.cost_type}_{args.inf_type}_{args.pid}.csv'
     )
   else :
-    # make Table 1
-    print("Experiment 1: Full Experiment")
-    selector = Selector('../data/exp1/', cost_type = 'cdf', inf_type = 'RSA', alpha = 12, costweight = 0.32)
     selector.print_examples('lion-tiger', 512)
-    selector = Selector('../data/exp1/', cost_type = 'cdf', inf_type = 'RSA', alpha = 12, costweight = 0.32)
-    selector.print_examples('snake-ash', 512)
-
-    print("Experiment 2: Ratings")
-    selector = Selector('../data/exp2/', cost_type = 'cdf', inf_type = 'RSA', alpha = 2, costweight = 0.36)
-    selector.print_examples('lion-tiger', 2048)
-    selector = Selector('../data/exp2/', cost_type = 'cdf', inf_type = 'RSA', alpha = 2, costweight = 0.06)
-    selector.print_examples('snake-ash', 512)
 
     ## Make Supplemental Figure
     for exp_path in ['../data/exp1', '../data/exp2'] :
