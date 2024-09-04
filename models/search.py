@@ -65,7 +65,7 @@ class SWOW:
         self.rw = pickle.load(f)
     else :
       indices = self.get_nodes_by_word(self.target_words)
-      self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices, alpha = 0)
+      self.rw = walker.random_walks(self.graph, n_walks=n_walks, walk_len=walk_len, start_nodes=indices, alpha = 0.2)
       with open(f'{exp_path}/model_input/walks.pkl', 'wb') as f:
         pickle.dump(self.rw, f)
 
