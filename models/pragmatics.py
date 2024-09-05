@@ -232,7 +232,7 @@ if __name__ == "__main__":
   parser.add_argument('--inf_type', type=str)
   parser.add_argument('--alpha', type=int)
   parser.add_argument('--costweight', type=float)
-  parser.add_argument('--pid', type=int)
+  parser.add_argument('--pid', type=int, default=0)
   parser.add_argument('--examples', action='store_true')
   args = parser.parse_args()
 
@@ -250,12 +250,15 @@ if __name__ == "__main__":
       compiled_df = pd.DataFrame()
       for index, row in pairs.iterrows() :
         targets = row['wordpair']
-        cost_fn_fit = row['cost_fn']
+        cost_fn_fit = int(row['cost_fn'])
         alpha = row['alpha']
         costweight = row['costweight']
         clues = row['collapsed_clues'].split(', ')
         print(f"target: {targets}, cost_fn: {cost_fn_fit}, alpha: {alpha}, costweight: {costweight}, clues: {clues}")
-        selector = Selector(parser.parse_args(["--experiment", exp_path, "--cost_type", 'cdf', "--inf_type", 'RSA', "--alpha", alpha, "--costweight", costweight]))
+        temp_args, _ = parser.parse_known_args(
+          ["--experiment", exp_path, "--cost_type", 'cdf', "--inf_type", 'RSA', "--alpha", str(int(alpha)), "--costweight", str(float(costweight))]
+        )
+        selector = Selector(temp_args)
         target_df = selector.print_multiple_examples(targets, cost_fn_fit, clues)
         compiled_df = pd.concat([compiled_df, target_df])
       compiled_df.to_csv(f'{exp_path}/model_output/multiple_examples.csv')
