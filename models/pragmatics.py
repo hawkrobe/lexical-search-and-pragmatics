@@ -16,7 +16,7 @@ from scipy.special import softmax
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class Selector:
-  def __init__(self, exp_path, args) :
+  def __init__(self, args) :
 
     # handle parameters
     self.cost_type = args.cost_type
@@ -107,7 +107,7 @@ class Selector:
     '''
     literal guesser probability over each wordpair
     '''
-    return softmax(20*self.sims[boardname], axis = 0)
+    return softmax(50*self.sims[boardname], axis = 0)
 
   @lru_cache(maxsize=None)
   def diagnosticity(self, boardname, targetpair_idx) :
@@ -195,7 +195,7 @@ class Selector:
     cost = selector.cost[cost_fn_fit][targets]
     speaker_prob = selector.pragmatic_speaker(targets, boardname, cost_fn_fit, range(len(selector.vocab)))
     clue_list = ['poison', 'death', 'burn', 'hiss'] if targets == 'snake-ash' \
-      else ['cat','feline', 'animal','mammal', 'claws', 'hiss', 'crawl', 'fangs', 'back']
+      else ['cat','feline', 'animal','mammal', 'claws', 'hiss', 'crawl', 'fangs', 'dangerous']
     for word in clue_list :
       idx = list(selector.vocab["Word"]).index(word)
       print(f"clue: {word},  cost: {cost[idx]}, diag: {diag[idx]},  speaker_prob: {speaker_prob[idx]}")
@@ -227,7 +227,7 @@ class Selector:
 if __name__ == "__main__":
 
   parser = argparse.ArgumentParser(description='Calculate speaker probabilities.')
-  parser.add_argument('--experiment', type=int)
+  parser.add_argument('--experiment', type=str)
   parser.add_argument('--cost_type', type=str)
   parser.add_argument('--inf_type', type=str)
   parser.add_argument('--alpha', type=int)
@@ -255,7 +255,7 @@ if __name__ == "__main__":
         costweight = row['costweight']
         clues = row['collapsed_clues'].split(', ')
         print(f"target: {targets}, cost_fn: {cost_fn_fit}, alpha: {alpha}, costweight: {costweight}, clues: {clues}")
-        selector = Selector(exp_path, cost_type = 'cdf', inf_type = 'RSA', alpha = alpha, costweight = costweight)
+        selector = Selector(parser.parse_args(["--experiment", exp_path, "--cost_type", 'cdf', "--inf_type", 'RSA', "--alpha", alpha, "--costweight", costweight]))
         target_df = selector.print_multiple_examples(targets, cost_fn_fit, clues)
         compiled_df = pd.concat([compiled_df, target_df])
       compiled_df.to_csv(f'{exp_path}/model_output/multiple_examples.csv')
