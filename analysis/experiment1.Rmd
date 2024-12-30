@@ -173,7 +173,7 @@ compare_models_by_level <- function(data) {
 
   no_prag <- log_likelihoods %>% 
     filter(key == "no pragmatics-RSAcdf") %>% 
-    pull(log_likelihood),
+    pull(log_likelihood)
 
   no_search <- log_likelihoods %>% 
     filter(key == "no search-RSAcdf") %>% 

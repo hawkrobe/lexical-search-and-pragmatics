@@ -21,7 +21,7 @@ library(lme4)
 ## Vocab
 
 ```{r}
-vocab <- read_csv(here('./data/exp4/model_input/vocab.csv')) 
+vocab <- read_csv(here('../data/exp4/model_input/vocab.csv')) 
 
 vocab %>%
   pull(Word) %>%
@@ -32,7 +32,7 @@ vocab %>%
 ## import data and recode levels
 
 ```{r}
-exp4.raw <- read_csv(here("./data/exp4/raw.csv")) %>%
+exp4.raw <- read_csv(here("../data/exp4/raw.csv")) %>%
   mutate(correct = str_detect(wordpair, fixed(tolower(GUESS_1_FINAL))) 
          & str_detect(wordpair, fixed(tolower(GUESS_2_FINAL)))) %>% 
   rowwise() %>%
@@ -106,7 +106,7 @@ emmeans::emmeans(level_model, pairwise ~ level, adjust = "tukey")
 ### plot
 
 ```{r}
-exp4_complete <- read_csv(here("./data/exp4/cleaned_complete.csv")) %>%
+exp4_complete <- read_csv(here("../data/exp4/cleaned_complete.csv")) %>%
   filter(!clueGiverID %in% exclusionIDs) %>%
   select(-Level) %>%
   left_join(exp4_newlevels %>% select(wordpair, level))
@@ -132,7 +132,7 @@ d.order %>%
     labs(y = 'proportion matching\nfinal clue', x = '') +
     theme(aspect.ratio = 1)
 
-ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 2)
+#ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 2)
 ```
 
 ### by seqOrder
@@ -211,8 +211,7 @@ d.order %>%
     theme( legend.position = 'none') +
     ylim(0,1)
 
-ggsave(here('plots/exp4_order_difficulty.pdf'), 
-       units = 'in', width = 6, height = 3)
+#ggsave(here('plots/exp4_order_difficulty.pdf'), units = 'in', width = 6, height = 3)
 ```
 
 ## suppression and qualitative analyses
@@ -330,8 +329,7 @@ clueCounts %>%
     axis.title.y = element_text(size=16)
   )
 
-ggsave(here('plots/exp4_trauma_weird.pdf'), units = "in",
-       width = 7.5, height = 4)
+#ggsave(here('plots/exp4_trauma_weird.pdf'), units = "in",width = 7.5, height = 4)
 ```
 
 #### lion-tiger + ash-snake
@@ -394,7 +392,7 @@ clueCounts %>%
   #           size = 8,
   #           vjust = -0.5)      # Adjust the size of the text
 
-ggsave('plots/exp4_lion_tiger.pdf', units = 'in', height = 5, width =6)
+#ggsave('plots/exp4_lion_tiger.pdf', units = 'in', height = 5, width =6)
 
 
 clueCounts %>%
@@ -427,7 +425,7 @@ clueCounts %>%
   #           vjust = -0.3)      # Adjust the size of the text
 
 
-ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
+#ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
 ```
 
 # Model results
@@ -468,20 +466,20 @@ beste4_models %>%
     labs(x = "search budget", y = "log likelihood") +
     theme(aspect.ratio = 1)
 
-ggsave(here('plots/exp4_modelcomparison.pdf'), units = 'in', height = 3, width = 10)
+#ggsave(here('plots/exp4_modelcomparison.pdf'), units = 'in', height = 3, width = 10)
 ```
 
 ## Examine example walks
 
 ```{r}
 pairs = exp4_newlevels %>% pull(wordpair) %>% unique()
-clues <- read_csv(here('./data/exp4/cleaned_complete.csv')) %>%
+clues <- read_csv(here('../data/exp4/cleaned_complete.csv')) %>%
   group_by(wordpair, seqOrder, correctedClue) %>%
   tally(name = 'clueCount') %>%
   filter(seqOrder == 'clueFinal')
 
 getWalks <- function(pair) {
-  paste0('./data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
+  paste0('../data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
     here() %>%
     fromJSON() %>% 
     as_tibble() %>%
@@ -566,9 +564,9 @@ walks %>%
 Find best alpha overall
 
 ```{r}
-df.mixture <- read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
+df.mixture <- read_csv(here("../data/exp4/model_output/mixture_scores.csv")) %>% 
   select(-Level) %>%
-  left_join(d.levels) %>%
+  left_join(exp4_newlevels) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
   filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   group_by(level, seqOrder, alpha) %>%
@@ -624,14 +622,14 @@ bind_rows(
 ## Examine mixture scores
 
 ```{r}
-read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
+read_csv(here("../data/exp4/model_output/mixture_scores.csv")) %>% 
   mutate(src = 'empirical')%>%
   select(-Level) %>%
-  left_join(d.levels) %>%
+  left_join(exp4_newlevels) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
   group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue, alpha) %>%
   summarize(mix = mean(mixture_index)) %>% 
-  summarize(value = min(value, na.rm = T))
+  summarize(value = min(mix, na.rm = T))%>%
   filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   pivot_longer(names_to = 'measure', values_to = 'value', 
                cols = c(mix)) %>% 
