@@ -22,6 +22,7 @@ class Selector:
     self.cost_type = args.cost_type
     self.inf_type = args.inf_type
     self.alpha = args.alpha
+    self.guesser_alpha = args.guesser_alpha
     self.costweight = args.costweight
 
     # read in metadata
@@ -107,7 +108,7 @@ class Selector:
     '''
     literal guesser probability over each wordpair
     '''
-    return softmax(50*self.sims[boardname], axis = 0)
+    return softmax(self.guesser_alpha * self.sims[boardname], axis = 0)
 
   @lru_cache(maxsize=None)
   def diagnosticity(self, boardname, targetpair_idx) :
@@ -194,11 +195,10 @@ class Selector:
     diag = selector.diagnosticity(boardname, target_idx)
     cost = selector.cost[cost_fn_fit][targets]
     speaker_prob = selector.pragmatic_speaker(targets, boardname, cost_fn_fit, range(len(selector.vocab)))
-    clue_list = ['poison', 'death', 'burn', 'hiss'] if targets == 'snake-ash' \
-      else ['cat','feline', 'animal','mammal', 'claws', 'hiss', 'crawl', 'fangs', 'dangerous']
+    clue_list =  ['cat','feline', 'animal','mammal', 'claws', 'dangerous']
     for word in clue_list :
       idx = list(selector.vocab["Word"]).index(word)
-      print(f"clue: {word},  cost: {cost[idx]}, diag: {diag[idx]},  speaker_prob: {speaker_prob[idx]}")
+      print(f"clue: {word},  cost: {cost[idx]}, diag: {np.log(diag[idx])},  speaker_prob: {speaker_prob[idx]}")
 
   def print_multiple_examples(self, targets, cost_fn_fit, clues):
     # find the board with the target wordpair
@@ -231,6 +231,7 @@ if __name__ == "__main__":
   parser.add_argument('--cost_type', type=str)
   parser.add_argument('--inf_type', type=str)
   parser.add_argument('--alpha', type=int)
+  parser.add_argument('--guesser_alpha', type=int, default=50)
   parser.add_argument('--costweight', type=float)
   parser.add_argument('--pid', type=int, default=0)
   parser.add_argument('--examples', action='store_true')
@@ -242,7 +243,8 @@ if __name__ == "__main__":
       f'{exp_path}/model_output/speaker_df_{args.cost_type}_{args.inf_type}_{args.pid}.csv'
     )
   else :
-    selector.print_examples('lion-tiger', 512)
+    # python pragmatics.py --examples --alpha 32 --costweight 0.16 --cost_type cdf --inf_type RSA --experiment exp1
+    selector.print_examples('lion-tiger', 256)
 
     ## Make Supplemental Figure
     for exp_path in ['../data/exp1', '../data/exp2'] :
