@@ -32,7 +32,7 @@ vocab %>%
 ## import data and recode levels
 
 ```{r}
-exp4.raw <- read_csv(here("../data/exp4/raw.csv")) %>%
+exp4.raw <- read_csv(here("data/exp4/raw.csv")) %>%
   mutate(correct = str_detect(wordpair, fixed(tolower(GUESS_1_FINAL))) 
          & str_detect(wordpair, fixed(tolower(GUESS_2_FINAL)))) %>% 
   rowwise() %>%
@@ -106,7 +106,7 @@ emmeans::emmeans(level_model, pairwise ~ level, adjust = "tukey")
 ### plot
 
 ```{r}
-exp4_complete <- read_csv(here("data/exp4/cleaned_complete.csv")) %>%
+exp4_complete <- read_csv(here("data/exp4/cleaned.csv")) %>%
   filter(!clueGiverID %in% exclusionIDs) %>%
   select(-Level) %>%
   left_join(exp4_newlevels %>% select(wordpair, level))
@@ -274,7 +274,7 @@ exp3 = read_csv("../data/exp3/cleaned.csv") %>%
   mutate(exp = "exp3", seqOrder = "clueFinal") %>%
   select(wordpair, correctedClue, boardnames, exp, seqOrder)
 
-exp4 = read_csv("../data/exp4/cleaned_complete.csv") %>%
+exp4 = read_csv("../data/exp4/cleaned.csv") %>%
   filter(!clueGiverID %in% exclusionIDs) %>%
   mutate(seqOrder = ifelse(seqOrder == "clueFinal", "clueFinal", "candidate")) %>%
   mutate(wordpair = toupper(wordpair)) %>%
@@ -474,13 +474,13 @@ beste4_models %>%
 
 ```{r}
 pairs = exp4_newlevels %>% pull(wordpair) %>% unique()
-clues <- read_csv(here('../data/exp4/cleaned_complete.csv')) %>%
+clues <- read_csv(here('data/exp4/cleaned.csv')) %>%
   group_by(wordpair, seqOrder, correctedClue) %>%
   tally(name = 'clueCount')  %>%
   ungroup()
 
 getWalks <- function(pair) {
-  paste0('../data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
+  paste0('data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
     here() %>%
     fromJSON() %>% 
     as_tibble() %>%
@@ -531,7 +531,7 @@ d.spearmancor.toplot <- d.spearmancor %>%
 d.spearmancor.toplot %>%
   ungroup() %>%
 #  mutate(seqOrder = fct_relevel(seqOrder, 'clueOrder1', 'clueOrder2', 'clueOrder3')) %>%
-  filter(step %in% 2**seq(1,13)) %>%
+  filter(step %in% round(1.5**seq(1,30))) %>%
   ggplot(aes(x = step, y = r, color = level, linetype = seqOrder)) +
     geom_line() +
     theme_few() +
@@ -553,22 +553,47 @@ d.spearmancor %>%
   filter(r == max(r)) 
 ```
 
-## CDFs
+## Example CDFs (Fig 2)
 
 ```{r}
 walks %>%
-  filter(wordpair == 'lion-tiger') %>%
-  ggplot(aes(x = step, y = cdf, group = correctedClue)) +
-    geom_line() +
-    theme_few()
+  filter(wordpair %in% c('lion-tiger', 'trauma-weird')) %>%
+  left_join(clues) %>%
+  ggplot(aes(x = step, y = cdf)) +
+    geom_line(aes(group = correctedClue, alpha = clueCount)) +
+    geom_text(aes(label = correctedClue), check_overlap = F,
+              data = . %>% filter(clueCount > 10, step == 9990)) +
+    theme_few() +
+    facet_wrap(~ wordpair) +
+    scale_x_log10(limits = c(2,20000))
+
+ggsave(here(paste0('analysis/plots/cdf-duo.pdf')), 
+units='in', height = 4, width = 8)
 ```
 
-## Examine how far you have to go to find clue
+## All CDFs (Fig S4)
+
+```{r}
+walks %>%
+  left_join(clues) %>%
+  ggplot(aes(x = step, y = cdf)) +
+    geom_line(aes(group = correctedClue, alpha = clueCount)) +
+    geom_text(aes(label = correctedClue), check_overlap = F,
+              data = . %>% filter(clueCount > 10, step == 9990)) +
+    theme_few() +
+    facet_wrap(~ wordpair) +
+    scale_x_log10(limits = c(2,20000))
+
+ggsave(here(paste0('analysis/plots/cdfs-all.pdf')), 
+units='in', height = 4, width = 8)
+```
+
+## Ranks (Figure S2)
 
 Find best alpha overall
 
 ```{r}
-df.mixture <- read_csv(here("../data/exp4/model_output/mixture_scores.csv")) %>% 
+df.mixture <- read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
   select(-Level) %>%
   left_join(exp4_newlevels) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
@@ -585,14 +610,15 @@ bind_rows(
   read_csv(here("data/exp4/model_output/ranks.csv"))  %>% mutate(src = 'empirical'),
   read_csv(here("data/exp4/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
-  left_join(read_csv(here("data/exp4/model_output/freq_scores.csv")) %>% mutate(src = 'empirical'), 
+  rename(wordpair = `wordpair...4`) %>%
+  left_join(read_csv(here("data/exp4/model_output/freqs_long.csv")) %>% mutate(src = 'empirical'), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>% 
   left_join(read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
               mutate(src = 'empirical')  %>% filter(alpha == 1.0), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>%
   filter(correctedClue %in% (vocab %>% pull(Word))) %>%
   select(-Level) %>%
-  left_join(d.levels) %>%
+  left_join(exp4_newlevels) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
   filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue) %>%
@@ -610,52 +636,21 @@ bind_rows(
   filter(!is.na(value)) %>%
   tidyboot_mean(value, nboot=10, na.rm = T) %>%
   ggplot(aes(x = seqOrder, y = empirical_stat, color = level, linetype = src, group = interaction(src, level))) +
-    geom_line(aes(alpha =)) +
+    geom_line() +
     geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
     facet_grid( ~ measure) +
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
     scale_x_discrete(guide = guide_axis(angle = 90)) +
     theme_few() +
-    scale_y_log10(limits=c(100,NA)) +
+#    scale_y_log10(limits=c(100,NA)) +
     labs(x = '', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
 #ggsave("../analysis/plots/exp4_ranks.pdf", width = 6, height = 4, units = 'in')
 ```
 
-## Examine mixture scores
 
-```{r}
-read_csv(here("../data/exp4/model_output/mixture_scores.csv")) %>% 
-  mutate(src = 'empirical')%>%
-  select(-Level) %>%
-  left_join(exp4_newlevels) %>%
-  mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
-  group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue, alpha) %>%
-  summarize(mix = mean(mixture_index)) %>% 
-  summarize(value = min(mix, na.rm = T))%>%
-  filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
-  pivot_longer(names_to = 'measure', values_to = 'value', 
-               cols = c(mix)) %>% 
-  ungroup() %>%
-  mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(measure, seqOrder, src, level) %>%
-  tidyboot_mean(value, nboot=10, na.rm = T) %>%
-  ggplot(aes(x = seqOrder, alpha = alpha, y = empirical_stat, color = level, linetype = src, group = interaction(src, alpha, level))) +
-    geom_line() +
-    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1, color = NA) +
-    #facet_grid( ~ level) +
-    scale_color_few() +
-    #scale_x_discrete(guide = guide_axis(angle = 90)) +
-    theme_few() +
-    scale_y_log10(limits=c(100,NA)) +
-    labs(x = 'alpha', y = 'first occurrence') +
-    theme(aspect.ratio = 2)
-
-#ggsave("../analysis/plots/exp2_ranks_mixture.pdf", width = 6, height = 4, units = 'in')
-```
-
-## Examine walk scores
+## Examine walk scores (Figure S3)
 
 ```{r}
 d.scores <- bind_rows(
@@ -668,7 +663,7 @@ d.scores <- bind_rows(
   filter(strategy != 'freq') %>%
   mutate(strategy = fct_collapse(strategy, single = c('w1', 'w2'))) %>%
   select(-Level) %>%
-  left_join(d.levels) %>%
+  left_join(exp4_newlevels) %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
   group_by(budget, src, level, strategy) %>%
   summarize(empirical_stat = mean(value, na.rm = T), 
@@ -688,177 +683,4 @@ d.scores %>%
     theme(aspect.ratio = 2)
 
 #ggsave("../analysis/plots/exp4_scores.pdf", width = 6, height = 4, units = 'in')
-```
-
-# SUPPLEMENTARY (might delete eventually)
-## data organization
-
-```{r}
-targets = read_csv(here("../data/exp4/targets.csv"))
-cleaned = read_csv(here("../data/exp4/cleaned.csv")) %>%
-  left_join(targets)
-
-cleaned_final = cleaned %>% filter(seqOrder == "clueFinal")
-
-write.csv(cleaned_final, file = "../data/exp4/cleaned_clueFinal.csv", row.names = FALSE)
-
-cdf = read_csv(here("../data/exp4/model_output/freqs_long.csv"))
-
-head(cdf)
-
-cleaned_complete = read_csv(here("../data/exp4/cleaned_complete.csv")) 
-candidates = cleaned_complete %>% filter(seqOrder != "clueFinal")
-write.csv(candidates, file = "../data/exp4/cleaned_candidates.csv", row.names = FALSE)
-```
-
-<!-- ## Recode Levels -->
-
-<!-- ```{r} -->
-<!-- d.raw.oldlevels <- read_csv(here("../data/exp4/raw.csv"))# %>% -->
-<!--   mutate(correct = str_detect(wordpair, fixed(tolower(GUESS_1_FINAL)))  -->
-<!--                    & str_detect(wordpair, fixed(tolower(GUESS_2_FINAL)))) %>% -->
-<!--   rowwise() %>% -->
-<!--   mutate(Word1 = min(target1, target2), -->
-<!--          Word2 = max(target1, target2)) %>%  -->
-<!--   ungroup()  -->
-
-<!-- d.newlevels <- d.raw.oldlevels %>%  -->
-<!--   unite(wordpair, Word1, Word2, sep = '-') %>% -->
-<!--   group_by(wordpair) %>% -->
-<!--   summarize(correct = mean(correct)) %>% -->
-<!--   arrange(correct) %>% -->
-<!--   mutate(level = case_when(correct < .25 ~ 'Hard', -->
-<!--                            correct > .67 ~ 'Easy', -->
-<!--                            TRUE ~ 'Medium')) %>% -->
-<!--   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) -->
-
-<!-- # preserve ordering of target pair in d.raw -->
-<!-- d.levels <- bind_rows( -->
-<!--   d.newlevels %>% group_by(wordpair, level) %>% tally(), -->
-<!--   d.newlevels %>%  -->
-<!--     separate(wordpair, into = c('word1', 'word2'), sep = '-') %>% -->
-<!--     unite(wordpair, word2, word1, sep = '-') %>%  -->
-<!--     group_by(wordpair, level) %>% tally() -->
-<!-- ) %>% select(-n) %>% -->
-<!--   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) -->
-
-<!-- d.raw <- d.raw.oldlevels %>% -->
-<!--   left_join(d.levels) -->
-<!-- ``` -->
-
-## How many clues listed?
-
-```{r}
-exp4 %>%
-  group_by(clueGiverID, level, wordpair) %>%
-  tally() %>%
-  ggplot(aes(x = n - 1)) +
-    geom_bar() +
-    theme_few() +
-    labs(x = 'clues generated') +
-    facet_grid(~ level) +
-    theme(aspect.ratio = 1)
-```
-
-## Individual differences? 
-
-Most games stuck to exactly 3 clues but some were way out there.
-
-```{r}
-d %>%
-  group_by(clueGiverID, level, wordpair) %>%
-  tally() %>%
-  group_by(clueGiverID) %>%
-  mutate(avg_num_clues = mean(n)) %>%
-  mutate(clueGiverID = as.character(clueGiverID)) %>%
-  ggplot(aes(x = n - 1)) +
-    geom_bar() +
-    theme_few() +
-    labs(x = 'clues generated') +
-    facet_wrap(~ fct_reorder(clueGiverID, avg_num_clues)) +
-    theme(aspect.ratio = 1/4)
-```
-```{r}
-d.raw %>% group_by(level) %>% tidyboot_mean(TEOption1, nboot = 1000, na.rm = T) %>% 
-  ggplot(aes(x = level, y = empirical_stat, fill = level)) +
-    geom_bar(stat = 'identity') +
-    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    labs(y = 'time to generate first clue (ms)') +
-    theme_few() +
-    scale_fill_few() +
-    theme(aspect.ratio = 1, legend.position = 'none') +
-    scale_fill_manual(values = c('#60BD68', '#D8CF23', '#CC253D'))
-
-#ggsave(here('analysis/plots/generation_time.pdf'), units = 'in', width = 4, height = 4)
-```
-
-```{r}
-d.raw %>%
-  lm(TEOption1 ~ level, data = .) %>%
-  summary()
-```
-
-## Exclusions
-
-```{r}
-# inclusions <- exp4 %>%
-#   group_by(clueGiverID, wordpair) %>%
-#   tally() %>%
-#   group_by(clueGiverID) %>%
-#   tally() %>%
-#   filter(n > 20) %>%
-#   pull(clueGiverID)
-
-d <- read_csv(here("../data/exp4/cleaned.csv")) %>%
-  select(-Level) %>%
-  left_join(exp4_newlevels %>% select(wordpair, level))
-```
-
-
-```{r}
-d.order %>% 
-  group_by(seqOrder, level, match) %>%
-  tidyboot_mean(correct, na.rm = T) %>%
-  filter(match) %>%
-  arrange(level) %>%
-  ggplot(aes(x = seqOrder, y = empirical_stat, color = level, group = level)) +
-    geom_point() +
-    geom_line() +
-    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    theme_few() +
-    scale_color_few(name = "order") +
-    labs(y = 'accuracy', x = 'selection') +
-    theme(aspect.ratio = 1) +
-    ylim(0,1)
-```
-
-## Frequency differences?
-
-Something weird is going on with Medium, but across the board, it looks like the final clue is less common than the ones in the list. 
-
-```{r}
-d %>% filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
-  left_join(vocab %>% rename(correctedClue = Word, freq= LgSUBTLWF), by = "correctedClue") %>%
-  group_by(seqOrder, level) %>%
-  tidyboot_mean(freq, na.rm = T) %>%
-  ggplot(aes(x = seqOrder, y = empirical_stat, color = level, group = level)) +
-    geom_point() +
-    geom_line() +
-    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    theme_few() +
-    scale_fill_colorblind(name = "order") +
-    labs(y = 'proportion matching final clue', x = 'difficulty') +
-    theme(aspect.ratio = 1)
-```
-
-
-Statistics
-
-```{r}
-library(lmerTest)
-d %>% filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
-  left_join(vocab %>% rename(correctedClue = Word, freq= LgSUBTLWF), by = "correctedClue") %>%
-  lmer(freq ~ seqOrder + (1 | clueGiverID),
-       data = .) %>%
-  summary()
 ```
