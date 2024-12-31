@@ -43,7 +43,7 @@ car::Anova(lm(data=listener, accuracy ~ Level))
 listener %>% group_by(Level) %>% summarise(mean(accuracy))
 ```
 
-## merge into speaker dataframe 
+## merge model output into speaker dataframe 
 
 ```{r}
 # generate speaker_df from `models/run_parallel.sh` 
@@ -57,6 +57,7 @@ speaker <- read_csv(here("data/exp1/model_output/speaker_df.csv")) %>%
                           costweight == 1 ~ "no pragmatics",
                           TRUE ~ "search + pragmatics")) 
 ```
+
 
 # Model comparison
 
@@ -82,7 +83,7 @@ here('data/exp2/model_input/example_params.csv') %>%
             row.names = FALSE)
 ```
 
-# model comparison plot (Figure 1)
+# model comparison plot (Figure 3)
 
 ```{r}
 beste1_models <- speaker %>%  
@@ -246,7 +247,7 @@ ggsave(here("analysis/plots/exp1_heatmap.pdf"),
        units = 'in', width = 8, height = 3)
 ```
 
-# Appendix A: Blended model
+# Appendix A (Blended model)
 
 ```{r}
 d_exp1 <- read_csv(here("data/exp1/cleaned.csv")) %>%
@@ -283,6 +284,8 @@ blended %>%
   group_by(Level) %>%
   filter(loglik == max(loglik))
 ```
+
+## Figure S1
 
 ```{r}
 blended %>%
