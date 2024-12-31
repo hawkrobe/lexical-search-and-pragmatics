@@ -2,55 +2,25 @@ import pandas as pd
 import numpy as np
 import math
 import scipy
-from collections import defaultdict
+
 from sklearn.preprocessing import MinMaxScaler
+from joblib import Parallel, delayed
+from collections import defaultdict, Counter
+from search import SWOW
 
 class Baseline:
     '''
     Class executing random walks from association norms given by the SWOW model.
     '''
-    def __init__(self) :
-        self.vocab = list(pd.read_csv("../data/exp1/model_input/vocab.csv").Word)
-
-    def midpoint_scores(self, w1, w2):
-        # import swow associative embeddings
-        embeddings = pd.read_csv("../data/exp1/model_input/swow_associative_embeddings.csv").transpose().values
-        # import vocab
-        w1_vec = embeddings[self.vocab.index(w1)]
-        w2_vec = embeddings[self.vocab.index(w2)]
-        midpoint = (w1_vec + w2_vec)/2
-        midpoint = midpoint.reshape((1, embeddings.shape[1]))
-        similarities = 1 - scipy.spatial.distance.cdist(midpoint, embeddings, 'cosine')
-        y = np.array(similarities)
-        y_sorted = np.argsort(-y).flatten() ## gives sorted indices
-        closest_words = [self.vocab[i] for i in y_sorted]
-        return closest_words
-
-    def save_midpoint_scores(self, data_path):
-        expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
+    def __init__(self, data_path) :
+        self.vocab = list(pd.read_csv(f"{data_path}/model_input/vocab.csv").Word)
+        self.data_path = data_path
+        
+    def save_frequency_scores(self):
+        expdata = pd.read_csv(f"{self.data_path}/cleaned.csv", encoding= 'unicode_escape')
         scores = defaultdict(list)
         rows = []
-        for name, group in expdata.groupby('wordpair') :
-            closest_to_midpoint = self.midpoint_scores(group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0])
-            clue_list = group['correctedClue'].to_numpy()
-            for clue in clue_list:
-                index = closest_to_midpoint.index(clue) if clue in closest_to_midpoint else None
-                scores['mid_index'].append(index)
-            rows.append(group)
-
-        pd.concat(
-            [
-                pd.concat(rows,axis=0,ignore_index=True),
-                pd.DataFrame.from_dict(scores)
-            ],
-            axis=1
-        ).to_csv('/'.join(data_path.split('/')[:-1])+'/model_output/midpoint_scores.csv')
-
-    def save_frequency_scores(self,data_path):
-        expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
-        scores = defaultdict(list)
-        rows = []
-        freq = list(pd.read_csv("../data/exp1/model_input/vocab.csv").sort_values(by="LgSUBTLWF", ascending=False)["Word"])
+        freq = list(pd.read_csv(f"{self.data_path}/model_input/vocab.csv").sort_values(by="LgSUBTLWF", ascending=False)["Word"])
         # sort by frequency
         for name, group in expdata.groupby('wordpair') :
             clue_list = group['correctedClue'].to_numpy()
@@ -65,11 +35,11 @@ class Baseline:
                 pd.DataFrame.from_dict(scores)
             ],
             axis=1
-        ).to_csv('/'.join(data_path.split('/')[:-1])+'/model_output/freq_scores.csv')
+        ).to_csv(f'{self.data_path}/model_output/freqs_long.csv')
       
     def shared_neighbors(self, w1, w2, alpha):
       # Read the strengths file
-      df = pd.read_csv("../data/exp1/model_input/swow_strengths.csv")
+      df = pd.read_csv("../data/exp4/model_input/swow_strengths.csv")
 
       # Find all neighbors of word1
       neighbors_word1 = set(df[df['cue'] == w1]['response'].tolist())
@@ -88,7 +58,7 @@ class Baseline:
           
           combined_strength = strength_to_word1 * strength_to_word2
 
-          freqs = pd.read_csv("../data/exp1/model_input/vocab.csv")
+          freqs = pd.read_csv("../data/exp4/model_input/vocab.csv")
 
 
           log_freq = freqs[freqs['Word'] == word]['LgSUBTLWF'].values[0] if word in freqs['Word'].tolist() else 0.0001
@@ -116,9 +86,9 @@ class Baseline:
       combined_scores_dict = {k: v for k, v in sorted(combined_scores_dict.items(), key=lambda item: item[1], reverse=True)}
       return list(combined_scores_dict.keys())
     
-    def save_mixture_scores(self, data_path):
+    def save_mixture_scores(self):
       # import empirical clues (cleaned)
-      expdata = pd.read_csv(f"{data_path}", encoding= 'unicode_escape')
+      expdata = pd.read_csv(f"{self.data_path}/cleaned.csv", encoding= 'unicode_escape')
       scores = defaultdict(list)
       alpha_dict = defaultdict(list)
       rows = []
@@ -141,10 +111,10 @@ class Baseline:
               pd.DataFrame.from_dict(alpha_dict)
           ],
           axis=1
-      ).to_csv('/'.join(data_path.split('/')[:-1])+'/model_output/mixture_scores.csv')
+      ).to_csv(f'{self.data_path}/model_output/mixture_scores.csv')
 
 
-class ComplexSearch :
+class ComplexSearch(SWOW) :
 
   def score(self, group, clues_only = True) :
     # look up how often each clue was visited
@@ -198,7 +168,7 @@ class ComplexSearch :
     if permute :
       expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
 
-    with Parallel(n_jobs=60) as parallel:
+    with Parallel(n_jobs=2) as parallel:
       scores = parallel(delayed(self.score)(group, clues_only) for name, group in expdata.groupby('wordpair'))
 
     # save to file
@@ -255,7 +225,7 @@ class ComplexSearch :
     if permute :
       expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
 
-    with Parallel(n_jobs=60) as parallel:
+    with Parallel(n_jobs=2) as parallel:
       ranks = parallel(delayed(self.rank)(group, clues_only) for name, group in expdata.groupby('wordpair'))
 
     pd.concat(ranks).to_csv(
@@ -495,12 +465,17 @@ class utils:
     return df
 
 if __name__ == "__main__" :
-    baseline = Baseline()
-    baseline.save_mixture_scores('../data/exp1/cleaned.csv')
+    # main text
+    Baseline('../data/exp1').save_frequency_scores()
+    Baseline('../data/exp2').save_frequency_scores()
+    Baseline('../data/exp3').save_frequency_scores()
 
     # Appendix B
-    union_intersect = ComplexSearch('../data/exp2')
-    union_intersect.save_scores('../data/exp2/', permute = False)
-    union_intersect.save_scores('../data/exp2/', permute = True)
-    union_intersect.save_rank_order('../data/exp2/', permute = False)
-    union_intersect.save_rank_order('../data/exp2/', permute = True)
+    baseline = Baseline('../data/exp4')
+    baseline.save_frequency_scores()
+#    baseline.save_mixture_scores()
+    union_intersect = ComplexSearch('../data/exp4')
+    union_intersect.save_scores('../data/exp4/', permute = False)
+    union_intersect.save_scores('../data/exp4/', permute = True)
+    union_intersect.save_rank_order('../data/exp4/', permute = False)
+    union_intersect.save_rank_order('../data/exp4/', permute = True)
