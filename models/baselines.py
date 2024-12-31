@@ -119,7 +119,7 @@ class ComplexSearch(SWOW) :
   def score(self, group, clues_only = True) :
     # look up how often each clue was visited
     clue_indices = self.get_nodes_by_word(group['correctedClue'].to_numpy()) if clues_only else self.get_nodes_by_word(self.vocab['Word'].to_numpy())
-    print(clue_indices[:5])
+    print(group)
     w1 = group['Word1'].to_numpy()[0]
     w2 = group['Word2'].to_numpy()[0]
     target_indices = self.get_nodes_by_word([w1, w2])
@@ -168,7 +168,7 @@ class ComplexSearch(SWOW) :
     if permute :
       expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
 
-    with Parallel(n_jobs=2) as parallel:
+    with Parallel(n_jobs=4) as parallel:
       scores = parallel(delayed(self.score)(group, clues_only) for name, group in expdata.groupby('wordpair'))
 
     # save to file
@@ -180,7 +180,8 @@ class ComplexSearch(SWOW) :
     # convert words to nodes
     target_nodes = self.get_nodes_by_word([group['Word1'].to_numpy()[0], group['Word2'].to_numpy()[0]])
     clue_nodes = self.get_nodes_by_word(group['correctedClue'].to_numpy()) if clues_only else self.get_nodes_by_word(self.vocab['Word'].to_numpy())
-
+    print(group)
+    
     # loop through 10000 pairs of walks to get indices of first appearances
     w1_walks = np.array([x for x in self.rw if x[0] == target_nodes[0]]).tolist()
     w2_walks = np.array([x for x in self.rw if x[0] == target_nodes[1]]).tolist()
@@ -225,7 +226,7 @@ class ComplexSearch(SWOW) :
     if permute :
       expdata['correctedClue'] = expdata['correctedClue'].sample(frac=1).values
 
-    with Parallel(n_jobs=2) as parallel:
+    with Parallel(n_jobs=4) as parallel:
       ranks = parallel(delayed(self.rank)(group, clues_only) for name, group in expdata.groupby('wordpair'))
 
     pd.concat(ranks).to_csv(
@@ -477,5 +478,5 @@ if __name__ == "__main__" :
     union_intersect = ComplexSearch('../data/exp4')
     union_intersect.save_scores('../data/exp4/', permute = False)
     union_intersect.save_scores('../data/exp4/', permute = True)
-    union_intersect.save_rank_order('../data/exp4/', permute = False)
-    union_intersect.save_rank_order('../data/exp4/', permute = True)
+    union_intersect.save_ranks('../data/exp4/', permute = False)
+    union_intersect.save_ranks('../data/exp4/', permute = True)
