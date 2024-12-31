@@ -21,7 +21,7 @@ library(lme4)
 ## Vocab
 
 ```{r}
-vocab <- read_csv(here('./data/exp4/model_input/vocab.csv')) 
+vocab <- read_csv(here('data/exp4/model_input/vocab.csv')) 
 
 vocab %>%
   pull(Word) %>%
@@ -106,7 +106,7 @@ emmeans::emmeans(level_model, pairwise ~ level, adjust = "tukey")
 ### plot
 
 ```{r}
-exp4_complete <- read_csv(here("./data/exp4/cleaned_complete.csv")) %>%
+exp4_complete <- read_csv(here("data/exp4/cleaned_complete.csv")) %>%
   filter(!clueGiverID %in% exclusionIDs) %>%
   select(-Level) %>%
   left_join(exp4_newlevels %>% select(wordpair, level))
@@ -132,7 +132,7 @@ d.order %>%
     labs(y = 'proportion matching\nfinal clue', x = '') +
     theme(aspect.ratio = 1)
 
-ggsave(here('plots/exp4_order.pdf'), units = 'in', width = 4, height = 2)
+ggsave(here('analysis/plots/exp4_order.pdf'), units = 'in', width = 4, height = 2)
 ```
 
 ### by seqOrder
@@ -211,7 +211,7 @@ d.order %>%
     theme( legend.position = 'none') +
     ylim(0,1)
 
-ggsave(here('plots/exp4_order_difficulty.pdf'), 
+ggsave(here('analysis/plots/exp4_order_difficulty.pdf'), 
        units = 'in', width = 6, height = 3)
 ```
 
@@ -394,7 +394,7 @@ clueCounts %>%
   #           size = 8,
   #           vjust = -0.5)      # Adjust the size of the text
 
-ggsave('plots/exp4_lion_tiger.pdf', units = 'in', height = 5, width =6)
+ggsave('analysis/plots/exp4_lion_tiger.pdf', units = 'in', height = 5, width =6)
 
 
 clueCounts %>%
@@ -427,7 +427,7 @@ clueCounts %>%
   #           vjust = -0.3)      # Adjust the size of the text
 
 
-ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
+ggsave('analysis/plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
 ```
 
 # Model results
@@ -435,7 +435,7 @@ ggsave('plots/exp4_snake_ash.pdf', units = 'in', height = 5, width =6)
 ## basic model
 
 ```{r}
-exp4_speaker_df <- read_csv(here("../data/exp4/model_output/speaker_df.csv")) 
+exp4_speaker_df <- read_csv(here("data/exp4/model_output/speaker_df.csv")) 
 
 speaker = exp4_speaker_df%>%
   select(-Level) %>% left_join(exp4_newlevels) %>%
@@ -477,8 +477,8 @@ ggsave(here('plots/exp4_modelcomparison.pdf'), units = 'in', height = 3, width =
 pairs = exp4_newlevels %>% pull(wordpair) %>% unique()
 clues <- read_csv(here('./data/exp4/cleaned_complete.csv')) %>%
   group_by(wordpair, seqOrder, correctedClue) %>%
-  tally(name = 'clueCount') %>%
-  filter(seqOrder == 'clueFinal')
+  tally(name = 'clueCount')  %>%
+  ungroup()
 
 getWalks <- function(pair) {
   paste0('./data/exp4/model_output/walks/', pair, '-walks.json', collapse = '') %>%
@@ -489,7 +489,11 @@ getWalks <- function(pair) {
     gather(walk, correctedClue, -step) %>%
     mutate(walk = gsub('walk-', '', walk),
            start = ifelse(as.integer(walk) %% 2 == 0, 'w1', 'w2')) %>% 
-    right_join(clues %>% filter(wordpair == pair), by = c('correctedClue')) %>%
+    right_join(clues %>% 
+                 filter(wordpair == pair) %>% 
+                 select(wordpair, correctedClue) %>% 
+                 distinct(), 
+              by = c('correctedClue')) %>%
     group_by(walk, correctedClue, wordpair) %>%
     select(-start) %>%
     filter(step == first(step)) %>%
@@ -504,7 +508,7 @@ getWalks <- function(pair) {
 }
 ```
 
-## Statistics (spearman correlation figure)
+## Fig 11B
 
 ```{r}
 # note that this will take a very long time! 
@@ -512,7 +516,7 @@ walks <- map(pairs, getWalks, .progress = T) %>%
   list_rbind() 
 
 d.spearmancor <- walks %>%
-  left_join(clues %>% filter(seqOrder == 'clueFinal'), 
+  left_join(clues %>% filter(seqOrder %in% c('clueOption2', 'clueOption1', 'clueOption3')), 
             by = c('wordpair', 'correctedClue')) %>%
   filter(!is.na(seqOrder)) %>%
   group_by(wordpair, seqOrder, step) %>%
@@ -522,20 +526,19 @@ d.spearmancor <- walks %>%
 d.spearmancor.toplot <- d.spearmancor %>%
   ungroup() %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
-  group_by(step, level) %>%
+  group_by(step, seqOrder, level) %>%
   summarize(r = mean(r, na.rm=FALSE)) 
 
 d.spearmancor.toplot %>%
   ungroup() %>%
-  # mutate(seqOrder = fct_relevel(seqOrder, 'clueOrder2', 'clueOrder1', 'clueOrder3', 'clueFinal')) %>%
-  ggplot(aes(x = step, y = r, color = level)) +
-    # geom_line(aes(group = wordpair), alpha = 0.1,
-    #           data = d.spearmancor  %>% filter(step %in% 2**seq(1,13))) +
+#  mutate(seqOrder = fct_relevel(seqOrder, 'clueOrder1', 'clueOrder2', 'clueOrder3')) %>%
+  filter(step %in% 2**seq(1,13)) %>%
+  ggplot(aes(x = step, y = r, color = level, linetype = seqOrder)) +
     geom_line() +
     theme_few() +
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
     facet_grid(~ level)+
-    scale_alpha_manual(values = c(1, .2, .4, .8)) +
+#    scale_alpha_manual(values = c(1, .2, .4, .8)) +
     labs(y = 'spearman correlation') +
     scale_x_log10() +
     theme(aspect.ratio = 1)
@@ -545,9 +548,9 @@ d.spearmancor.toplot %>%
 
 ```{r}
 d.spearmancor %>% 
-  group_by(step, level) %>% 
+  group_by(step, seqOrder, level) %>% 
   summarize(r = mean(r)) %>% 
-  group_by(level) %>% 
+  group_by(seqOrder, level) %>% 
   filter(r == max(r)) 
 ```
 
