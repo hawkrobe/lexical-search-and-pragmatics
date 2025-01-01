@@ -594,9 +594,9 @@ bind_rows(
   read_csv(here("data/exp4/model_output/ranks_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
   rename(wordpair = `wordpair...4`) %>%
-  left_join(read_csv(here("data/exp4/model_output/freqs_long.csv")) %>% mutate(src = 'empirical'), 
+  left_join(read_csv(here("data/exp4/model_output/freq_ranks.csv")) %>% mutate(src = 'empirical'), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>% 
-  left_join(read_csv(here("data/exp4/model_output/mixture_scores.csv")) %>% 
+  left_join(read_csv(here("data/exp4/model_output/mixture_ranks.csv")) %>% 
               mutate(src = 'empirical')  %>% filter(alpha == 1.0), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>%
   filter(correctedClue %in% (vocab %>% pull(Word))) %>%
@@ -648,8 +648,6 @@ d.scores <- bind_rows(
   mutate(strategy = fct_collapse(strategy, single = c('w1', 'w2'))) %>%
   rename(wordpair = `wordpair...4`,
           level = Level) %>%
-  # select(-level) %>%
-  # left_join(exp4_newlevels) %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
   group_by(budget, src, level, strategy) %>%
   summarize(empirical_stat = mean(value, na.rm = T), 
