@@ -308,7 +308,6 @@ clueCounts = clueCounts %>% left_join(totals)%>%
   select(wordpair, correctedClue, exp, seqOrder, prop)
   
 # verify that exp props sum to 1
-
 clueCounts %>% group_by(exp, seqOrder) %>% summarise(sum = sum(prop))
 
 clueCounts %>%
@@ -384,14 +383,6 @@ clueCounts %>%
     strip.text = element_text(size = 20, face = "bold", color = "white"),
     strip.background = element_rect(color = "black", fill = "darkgray")
   )# +
-  # Add labels at the last point for each correctedClue
-  # geom_text(data = . %>%
-  #             group_by(correctedClue, wordpair) %>%
-  #             filter(exp == "E4\n(final)"),
-  #           aes(label = correctedClue),
-  #           hjust = -0.3,  # Slightly adjust the horizontal position
-  #           size = 8,
-  #           vjust = -0.5)      # Adjust the size of the text
 
 ggsave(here('analysis/plots/exp4_lion_tiger.pdf'), units = 'in', height = 5, width =6)
 
@@ -416,14 +407,6 @@ clueCounts %>%
     strip.text = element_text(size = 20, face = "bold", color = "white"),
     strip.background = element_rect(color = "black", fill = "darkgray")
   )# +
-  # # Add labels at the last point for each correctedClue
-  # geom_text(data = . %>%
-  #             group_by(correctedClue, wordpair) %>%
-  #             filter(exp == "E4\n(final)"),
-  #           aes(label = correctedClue),
-  #           hjust = -0.3,  # Slightly adjust the horizontal position
-  #           size = 5,
-  #           vjust = -0.3)      # Adjust the size of the text
 
 
 ggsave(here('analysis/plots/exp4_snake_ash.pdf'), units = 'in', height = 5, width =6)
@@ -617,8 +600,9 @@ bind_rows(
               mutate(src = 'empirical')  %>% filter(alpha == 1.0), 
             by = c('clueGiverID', 'correctedClue', 'seqOrder', 'Level', 'src', 'wordpair')) %>%
   filter(correctedClue %in% (vocab %>% pull(Word))) %>%
-  select(-Level) %>%
-  left_join(exp4_newlevels) %>%
+  # select(-Level) %>%
+  # left_join(exp4_newlevels) %>%
+  rename(level = Level) %>%
   mutate(seqOrder = fct_relevel(seqOrder, 'clueFinal', after = 3)) %>%
   filter(seqOrder %in% c('clueOption1', 'clueOption2', 'clueOption3', 'clueFinal')) %>%
   group_by(src, wordpair, level, seqOrder,clueGiverID, correctedClue) %>%
@@ -642,7 +626,7 @@ bind_rows(
     scale_color_manual(values = c('#60BD68', '#D8CF23', '#CC253D')) +
     scale_x_discrete(guide = guide_axis(angle = 90)) +
     theme_few() +
-#    scale_y_log10(limits=c(100,NA)) +
+    scale_y_log10(limits=c(100,NA)) +
     labs(x = '', y = 'first occurrence') +
     theme(aspect.ratio = 2)
 
@@ -657,13 +641,15 @@ d.scores <- bind_rows(
   read_csv(here("data/exp4/model_output/scores.csv")) %>% mutate(src = 'empirical'),
   read_csv(here("data/exp4/model_output/scores_permuted.csv")) %>% mutate(src = 'permuted')
 ) %>%
-  filter(seqOrder %in% c('clueFinal', 'clueOption1', 'clueOption2', 'clueOption3')) %>%
+  filter(seqOrder %in% c('clueFinal')) %>%
   gather(budget, value, union_2:w2_8192) %>%
   separate(budget, into = c('strategy', 'budget')) %>% 
   filter(strategy != 'freq') %>%
   mutate(strategy = fct_collapse(strategy, single = c('w1', 'w2'))) %>%
-  select(-Level) %>%
-  left_join(exp4_newlevels) %>%
+  rename(wordpair = `wordpair...4`,
+          level = Level) %>%
+  # select(-level) %>%
+  # left_join(exp4_newlevels) %>%
   mutate(level = fct_relevel(level, 'Easy', 'Medium', 'Hard')) %>%
   group_by(budget, src, level, strategy) %>%
   summarize(empirical_stat = mean(value, na.rm = T), 
