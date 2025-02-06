@@ -470,6 +470,143 @@ ggsave('plots/exp2_example.pdf',units = 'in', height = 13, width = 10)
 
 ```
 
+# demographics
+
+## speaker
+
+```{r}
+speaker_data = read_csv("../data/exp2/raw.csv") %>%
+  filter(sona_id %in% raw_data$sona_id)%>%
+  filter(typeoftrial %in% c("demo", "english")) %>% 
+  select(sona_id, response) %>% filter(response != 0)
+
+parsed_speaker = speaker_data %>%
+  mutate(response = map(response, ~fromJSON(.x))) %>% 
+  unnest_wider(response) %>%
+  mutate(Race = map(Race, ~if (is.null(.x)) NA else .x)) %>%
+  group_by(sona_id) %>%
+  summarize(
+    Age = first(na.omit(Age)),
+    Gender = first(na.omit(Gender)),
+    Education = first(na.omit(Education)),
+    Race = list(flatten_chr(Race)),
+    .groups = 'drop'
+  ) %>%
+  # Remove NAs from Race and apply conditions
+  mutate(
+    Race = map_chr(Race, ~{
+      clean_race <- na.omit(.x)  # Remove NAs
+      if (length(clean_race) == 0) {
+        NA_character_  # No race info
+      } else if (length(unique(clean_race)) > 1) {
+        "Multiracial"  # Multiple races
+      } else {
+        unique(clean_race)  # Single race
+      }
+    })
+  )
+
+parsed_speaker %>%
+  mutate(
+    Gender_grouped = case_when(
+      Gender %in% c("male", "Male") ~ "men",
+      Gender %in% c("female", "Girl", "Female", "Female ") ~ "women",
+      Gender %in% c("agender", "Nonbinary", "NonBinary") ~ "non-binary",
+      TRUE ~ "other"  # Catch any unexpected entries
+    )
+  )%>%
+  count(Gender_grouped) %>%
+  mutate(percent = n/sum(n))
+
+parsed_speaker %>% 
+  mutate(Age = as.numeric(Age)) %>%
+  summarize(mean_age = mean(Age), sd_age = sd(Age))
+
+parsed_speaker %>% 
+  mutate(Education = case_when(
+    Education == "12-13" ~ 12.5,
+    Education == "Freshman In College" ~ 11,
+    TRUE ~ as.numeric(Education)
+  )) %>%
+  summarize(mean_ed = mean(Education), sd_ed = sd(Education))
+
+parsed_speaker %>%
+  count(Race) %>%
+  mutate(percent = n/sum(n))
+```
+
+## listener
+
+```{r}
+listener_data = read_csv("../data/exp2/listener.csv") %>% 
+  filter(typeoftrial %in% c("demo", "english")) %>% 
+  # excluding second attempt of 61440, identified by a different timestamp 
+  filter(subject != 43110) %>%
+  select(sona_id, response) %>% filter(response != 0) %>%
+  mutate(is_valid = map_lgl(response, ~tryCatch({
+    fromJSON(.x)
+    TRUE
+  }, error = function(e) FALSE))) %>%
+  filter(is_valid)
+
+parsed_listener = listener_data %>%
+  mutate(response = map(response, ~fromJSON(.x))) %>% 
+  unnest_wider(response) %>%
+  mutate(Race = map(Race, ~if (is.null(.x)) NA else .x)) %>%
+  group_by(sona_id) %>%
+  summarize(
+    Age = first(na.omit(Age)),
+    Gender = first(na.omit(Gender)),
+    Education = first(na.omit(Education)),
+    Race = list(flatten_chr(Race)),
+    English = first(na.omit(English)),
+    .groups = 'drop'
+  ) %>%
+  # Remove NAs from Race and apply conditions
+  mutate(
+    Race = map_chr(Race, ~{
+      clean_race <- na.omit(.x)  # Remove NAs
+      if (length(clean_race) == 0) {
+        NA_character_  # No race info
+      } else if (length(unique(clean_race)) > 1) {
+        "Multiracial"  # Multiple races
+      } else {
+        unique(clean_race)  # Single race
+      }
+    })
+  )
+
+parsed_listener %>%
+  mutate(
+    Gender_grouped = case_when(
+      Gender %in% c("male", "Male") ~ "men",
+      Gender %in% c("female", "Female", "woman") ~ "women",
+      Gender %in% c("genderfluid", "Nonbinary", "NonBinary") ~ "non-binary",
+      TRUE ~ "other"  # Catch any unexpected entries
+    )
+  )%>%
+  count(Gender_grouped) %>%
+  mutate(percent = n/sum(n))
+
+parsed_listener %>%
+  count(Race) %>%
+  mutate(percent = n/sum(n))
+
+parsed_listener %>% 
+  mutate(Age = as.numeric(Age)) %>%
+  summarize(mean_age = mean(Age), sd_age = sd(Age))
+
+parsed_listener %>% 
+  mutate(Education = case_when(
+    Education == "13 years" ~ 13,
+    Education == "12 years" ~ 12,
+    Education == "14 years" ~ 14,
+    TRUE ~ as.numeric(Education)
+  )) %>%
+  summarize(mean_ed = mean(Education), sd_ed = sd(Education))
+```
+
+
 
 
 <!-- # extra -->

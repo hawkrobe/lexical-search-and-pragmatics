@@ -241,6 +241,51 @@ ggsave('plots/exp3_models.pdf', units = 'in',height = 3, width = 10)
 
 ```
 
+# demographics
+
+```{r}
+demo = read_csv("../data/exp3/exp3_demo.csv")
+
+demo %>%
+  filter(!is.na(gender)) %>%
+  mutate(
+    Gender_grouped = case_when(
+      gender %in% c("male", "Male", "M") ~ "men",
+      gender %in% c("female", "Female", "F", "f") ~ "women",
+      gender %in% c("Male and non") ~ "non-binary",
+      TRUE ~ "other"  # Catch any unexpected entries
+    )
+  )%>%
+  count(Gender_grouped) %>%
+  mutate(percent = n/sum(n))
+
+demo %>%
+  filter(!is.na(race)) %>%
+  mutate(
+    race_grouped = case_when(
+      race %in% c("African American", 
+                  "Black and African American", "black") ~ "black",
+      race %in% c("Wh", "White", "white", "whites", 
+                  "whiteslashcauc", "whitesslashcaucasia") ~ "white",
+      race %in% c("asian", "south asian") ~ "asian",
+      TRUE ~ "other"  
+    )
+  ) %>%
+  count(race_grouped) %>%
+  mutate(percent = n / sum(n))  
+
+demo %>% filter(!is.na(age)) %>% 
+  summarize(mean_age = mean(age),
+            sd_age =sd(age))
+
+demo %>% filter(!is.na(education),
+                !education %in% c("num_1num_","l") ) %>% 
+  mutate(education = as.numeric(education))%>%
+  summarize(mean_ed = mean(education),
+            sd_ed =sd(education))
+```
+
+
 
 # SUPPPLEMENTARY? bar plot
 ```{r}
